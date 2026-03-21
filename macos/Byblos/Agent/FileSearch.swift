@@ -5,9 +5,13 @@ struct FileSearch {
 
     /// Search for files matching a query using Spotlight.
     static func search(query: String, limit: Int = 10) -> [FileResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
-        process.arguments = ["-limit", String(limit), query]
+        // Use -name for filename search, falling back to content search.
+        process.arguments = ["-limit", String(limit), "-name", trimmed]
 
         let pipe = Pipe()
         process.standardOutput = pipe

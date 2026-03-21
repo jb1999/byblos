@@ -42,7 +42,7 @@ class LlmService: ObservableObject {
             return nil
         }
         // Prefer larger/better models first.
-        let preferred = ["phi-3.5", "smollm2", "qwen", "tinyllama"]
+        let preferred = ["qwen2.5-7b", "qwen2.5-3b", "phi-3.5", "smollm2", "qwen", "tinyllama"]
         for prefix in preferred {
             if let match = files.first(where: { $0.lowercased().contains(prefix) && $0.hasSuffix(".gguf") }) {
                 return dir.appendingPathComponent(match).path

@@ -179,18 +179,27 @@ impl LlmEngine {
     }
 
     fn process(&self, text: &str, system_prompt: &str) -> Result<String> {
-        if text.is_empty() {
+        if text.is_empty() && system_prompt.is_empty() {
             return Ok(String::new());
         }
 
-        // Format as ChatML prompt.
-        let prompt = format!(
-            "<|im_start|>system\n{system_prompt}<|im_end|>\n\
-             <|im_start|>user\n{text}<|im_end|>\n\
-             <|im_start|>assistant\n"
-        );
+        // Format as ChatML prompt (compatible with Qwen2.5, Phi-3, and most models).
+        let prompt = if text.is_empty() {
+            // System-prompt-only mode (used for follow-up summarization).
+            format!(
+                "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n\
+                 <|im_start|>user\n{system_prompt}<|im_end|>\n\
+                 <|im_start|>assistant\n"
+            )
+        } else {
+            format!(
+                "<|im_start|>system\n{system_prompt}<|im_end|>\n\
+                 <|im_start|>user\n{text}<|im_end|>\n\
+                 <|im_start|>assistant\n"
+            )
+        };
 
-        let n_ctx = 2048u32;
+        let n_ctx = 4096u32;
         let ctx_params =
             LlamaContextParams::default().with_n_ctx(std::num::NonZero::new(n_ctx));
 
