@@ -27,6 +27,13 @@ typedef struct ByblosHandle ByblosHandle;
  */
 typedef void (*ByblosPartialCallback)(const char *text, void *user_data);
 
+bool byblos_init_llm_early(const char *model_path);
+
+/**
+ * Attach an early-initialized LLM to a pipeline handle.
+ */
+bool byblos_attach_llm(struct ByblosHandle *handle);
+
 /**
  * Create a new Byblos instance with the given model path and language.
  *

@@ -28,8 +28,17 @@ impl LlmEngine {
     /// - Phi-3-mini (3.8B, higher quality)
     /// - TinyLlama-1.1B (fastest, basic quality)
     pub fn load(model_path: &Path) -> Result<Self> {
-        let backend =
-            LlamaBackend::init().map_err(|e| anyhow::anyhow!("Failed to init llama backend: {e}"))?;
+        // Backend may already be initialized by whisper.cpp (both use ggml).
+        // That's OK — proceed regardless.
+        let backend = match LlamaBackend::init() {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!("LlamaBackend::init returned error (may be pre-initialized by whisper): {e}");
+                // Try to proceed anyway — construct a backend handle.
+                // If this fails, the model load will catch it.
+                return Err(anyhow::anyhow!("Cannot initialize llama backend: {e}"));
+            }
+        };
 
         let model_params = LlamaModelParams::default();
 

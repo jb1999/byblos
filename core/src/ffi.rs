@@ -7,6 +7,8 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
 
+use std::sync::Mutex;
+
 use crate::llm::LlmEngine;
 use crate::pipeline::Pipeline;
 
@@ -14,6 +16,58 @@ use crate::pipeline::Pipeline;
 pub struct ByblosHandle {
     pipeline: Pipeline,
     llm: Option<LlmEngine>,
+}
+
+/// Initialize the LLM backend early, before whisper/ggml.
+/// Must be called before `byblos_create` if you want LLM support.
+/// Returns an opaque LLM handle, or null on failure.
+/// Pass the returned handle to `byblos_attach_llm` after creating the pipeline.
+static EARLY_LLM: Mutex<Option<LlmEngine>> = Mutex::new(None);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_init_llm_early(model_path: *const c_char) -> bool {
+    let path = unsafe {
+        if model_path.is_null() {
+            return false;
+        }
+        match CStr::from_ptr(model_path).to_str() {
+            Ok(s) => s,
+            Err(_) => return false,
+        }
+    };
+
+    match LlmEngine::load(path.as_ref()) {
+        Ok(engine) => {
+            if let Ok(mut guard) = EARLY_LLM.lock() {
+                *guard = Some(engine);
+            }
+            log::info!("LLM initialized early (before whisper)");
+            true
+        }
+        Err(e) => {
+            log::error!("Failed to init LLM early: {e}");
+            false
+        }
+    }
+}
+
+/// Attach an early-initialized LLM to a pipeline handle.
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_attach_llm(handle: *mut ByblosHandle) -> bool {
+    let handle = unsafe {
+        if handle.is_null() {
+            return false;
+        }
+        &mut *handle
+    };
+
+    if let Ok(mut guard) = EARLY_LLM.lock() {
+        if let Some(engine) = guard.take() {
+            handle.llm = Some(engine);
+            return true;
+        }
+    }
+    false
 }
 
 /// Create a new Byblos instance with the given model path and language.

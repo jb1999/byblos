@@ -87,6 +87,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Engine
 
     private func setupEngine() {
+        // NOTE: LLM (llama.cpp) and whisper.cpp both use ggml-metal and cannot
+        // coexist in the same process yet — Metal backend can only init once.
+        // LLM will be moved to a helper process in a future update.
+        // For now, dictation modes use regex-based text processing.
+
         guard let modelPath = ByblosEngine.defaultModelPath() else {
             Log.error("No model found. Run: ./scripts/download-model.sh whisper-base-en")
             return
@@ -94,18 +99,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let language = UserDefaults.standard.string(forKey: "language") ?? "en"
         Log.info("Loading model from: \(modelPath), language: \(language)")
         engine = ByblosEngine(modelPath: modelPath, language: language)
-
-        // Try to load a local LLM for text post-processing.
-        if let llmPath = ByblosEngine.defaultLlmPath() {
-            Log.info("Loading LLM from: \(llmPath)")
-            if engine?.loadLlm(path: llmPath) == true {
-                Log.info("LLM loaded successfully")
-            } else {
-                Log.error("Failed to load LLM from \(llmPath)")
-            }
-        } else {
-            Log.info("No LLM model found — dictation modes will use basic text processing")
-        }
     }
 
     // MARK: - Menu Bar

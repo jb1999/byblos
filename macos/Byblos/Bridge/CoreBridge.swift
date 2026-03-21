@@ -80,7 +80,21 @@ class ByblosEngine {
 
     // MARK: - Local LLM
 
+    /// Initialize LLM early (must be called before ByblosEngine.init).
+    /// This is needed because llama.cpp and whisper.cpp share ggml backends
+    /// and llama must initialize first.
+    static func initLlmEarly(path: String) -> Bool {
+        path.withCString { byblos_init_llm_early($0) }
+    }
+
+    /// Attach an early-initialized LLM to this engine.
+    func attachLlm() -> Bool {
+        guard let handle else { return false }
+        return byblos_attach_llm(handle)
+    }
+
     /// Load a local LLM model (GGUF format) for text post-processing.
+    /// NOTE: This only works if called before whisper init. Use initLlmEarly + attachLlm instead.
     func loadLlm(path: String) -> Bool {
         guard let handle else { return false }
         return path.withCString { byblos_load_llm(handle, $0) }
