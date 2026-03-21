@@ -42,6 +42,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastTranscriptionTime: Double?
     private var recordingStartTime: CFAbsoluteTime = 0
     private var streamingTimer: Timer?
+    /// Lock to prevent concurrent access to the whisper model from streaming and final transcription.
+    private let engineLock = NSLock()
+    /// Last successful partial transcription — used as fallback if final transcription fails.
+    private var lastPartialText: String = ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("Byblos starting up...")
@@ -253,6 +257,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             hideOverlay()
         } else {
             Log.info("Recording started. Previous app: \(self.previousApp?.localizedName ?? "none")")
+            lastPartialText = ""
             startStreamingPolling()
         }
     }
@@ -263,10 +268,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         streamingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             let eng = self.engine
+            let lock = self.engineLock
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let partial = eng?.transcribeSnapshot(), !partial.isEmpty else { return }
+                guard lock.try() else { return } // Skip if engine is busy.
+                let partial = eng?.transcribeSnapshot()
+                lock.unlock()
+                guard let partial, !partial.isEmpty else { return }
                 DispatchQueue.main.async {
                     self.overlayWindow?.updatePartialText(partial)
+                    self.lastPartialText = partial
                     Log.info("Partial: \(partial)")
                 }
             }
@@ -281,7 +291,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopRecording() {
         guard isRecording else { return }
 
+        // IMPORTANT: Stop streaming polling first and wait for any in-flight
+        // snapshot transcription to complete before calling stopAndTranscribe.
+        // Both use the same whisper model state and cannot run concurrently.
         stopStreamingPolling()
+
         let recordingStopTime = CFAbsoluteTimeGetCurrent()
         let recordingDuration = recordingStopTime - recordingStartTime
 
@@ -320,8 +334,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Run transcription on a background thread to keep UI responsive.
         let eng = engine
         let accessibility = accessibilityService!
+        let lock = engineLock
+        let lastPartial = lastPartialText
         DispatchQueue.global(qos: .userInitiated).async {
-            let rawText = eng?.stopAndTranscribe()
+            // Wait for any in-flight snapshot to finish.
+            lock.lock()
+            var rawText = eng?.stopAndTranscribe()
+            lock.unlock()
+
+            // If final transcription is empty but we had streaming partials, use those.
+            if (rawText ?? "").isEmpty && !lastPartial.isEmpty {
+                Log.info("Final transcription empty — using last streaming partial")
+                rawText = lastPartial
+            }
             // Use engine-reported time if available, otherwise wall-clock.
             let engineMs = eng?.transcriptionTimeMs() ?? 0
             let elapsed: Double
