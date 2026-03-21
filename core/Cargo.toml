@@ -18,6 +18,10 @@ hound = "3.5"
 # Whisper
 whisper-rs = { version = "0.13", features = ["metal"] }
 
+# LLM
+llama-cpp-2 = "0.1.139"
+encoding_rs = "0.8"
+
 # VAD / ONNX
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 ndarray = "0.16"

@@ -7,11 +7,13 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
 
+use crate::llm::LlmEngine;
 use crate::pipeline::Pipeline;
 
 /// Opaque handle to a Byblos pipeline instance.
 pub struct ByblosHandle {
     pipeline: Pipeline,
+    llm: Option<LlmEngine>,
 }
 
 /// Create a new Byblos instance with the given model path and language.
@@ -46,7 +48,7 @@ pub extern "C" fn byblos_create(
     };
 
     match Pipeline::with_language(path.as_ref(), lang) {
-        Ok(pipeline) => Box::into_raw(Box::new(ByblosHandle { pipeline })),
+        Ok(pipeline) => Box::into_raw(Box::new(ByblosHandle { pipeline, llm: None })),
         Err(e) => {
             log::error!("Failed to create pipeline: {e}");
             ptr::null_mut()
@@ -207,6 +209,112 @@ pub extern "C" fn byblos_get_transcription_time_ms(handle: *const ByblosHandle) 
         &*handle
     };
     handle.pipeline.last_transcription_ms()
+}
+
+/// Load a local LLM model (GGUF format) for text post-processing.
+///
+/// Call this after `byblos_create` to enable LLM-powered dictation modes.
+/// Returns true on success, false on failure.
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_load_llm(
+    handle: *mut ByblosHandle,
+    model_path: *const c_char,
+) -> bool {
+    let handle = unsafe {
+        if handle.is_null() {
+            return false;
+        }
+        &mut *handle
+    };
+
+    let path = unsafe {
+        if model_path.is_null() {
+            return false;
+        }
+        match CStr::from_ptr(model_path).to_str() {
+            Ok(s) => s,
+            Err(_) => return false,
+        }
+    };
+
+    match LlmEngine::load(path.as_ref()) {
+        Ok(engine) => {
+            handle.llm = Some(engine);
+            true
+        }
+        Err(e) => {
+            log::error!("Failed to load LLM: {e}");
+            false
+        }
+    }
+}
+
+/// Process text through the local LLM with a system prompt.
+///
+/// Returns the processed text as a C string. Caller must free with `byblos_free_string`.
+/// Returns null if no LLM is loaded or processing fails.
+/// Falls back to returning the original text if LLM is not available.
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_process_text(
+    handle: *mut ByblosHandle,
+    text: *const c_char,
+    system_prompt: *const c_char,
+) -> *mut c_char {
+    let handle = unsafe {
+        if handle.is_null() {
+            return ptr::null_mut();
+        }
+        &mut *handle
+    };
+
+    let text_str = unsafe {
+        if text.is_null() {
+            return ptr::null_mut();
+        }
+        match CStr::from_ptr(text).to_str() {
+            Ok(s) => s,
+            Err(_) => return ptr::null_mut(),
+        }
+    };
+
+    let prompt_str = unsafe {
+        if system_prompt.is_null() {
+            return ptr::null_mut();
+        }
+        match CStr::from_ptr(system_prompt).to_str() {
+            Ok(s) => s,
+            Err(_) => return ptr::null_mut(),
+        }
+    };
+
+    let result = if let Some(ref llm) = handle.llm {
+        match llm.process(text_str, prompt_str) {
+            Ok(processed) => processed,
+            Err(e) => {
+                log::error!("LLM processing failed: {e}");
+                text_str.to_string()
+            }
+        }
+    } else {
+        // No LLM loaded — return original text.
+        text_str.to_string()
+    };
+
+    CString::new(result)
+        .map(|s| s.into_raw())
+        .unwrap_or(ptr::null_mut())
+}
+
+/// Check if a local LLM is loaded.
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_has_llm(handle: *const ByblosHandle) -> bool {
+    let handle = unsafe {
+        if handle.is_null() {
+            return false;
+        }
+        &*handle
+    };
+    handle.llm.is_some()
 }
 
 /// Destroy a Byblos instance and free all resources.

@@ -78,6 +78,51 @@ class ByblosEngine {
         return byblos_get_transcription_time_ms(handle)
     }
 
+    // MARK: - Local LLM
+
+    /// Load a local LLM model (GGUF format) for text post-processing.
+    func loadLlm(path: String) -> Bool {
+        guard let handle else { return false }
+        return path.withCString { byblos_load_llm(handle, $0) }
+    }
+
+    /// Check if a local LLM is loaded.
+    var hasLlm: Bool {
+        guard let handle else { return false }
+        return byblos_has_llm(handle)
+    }
+
+    /// Process text through the local LLM with a system prompt.
+    /// Returns processed text, or original text if LLM not available.
+    func processText(_ text: String, systemPrompt: String) -> String? {
+        guard let handle else { return nil }
+        let result: UnsafeMutablePointer<CChar>? = text.withCString { textPtr in
+            systemPrompt.withCString { promptPtr in
+                byblos_process_text(handle, textPtr, promptPtr)
+            }
+        }
+        guard let cStr = result else { return nil }
+        let output = String(cString: cStr)
+        byblos_free_string(cStr)
+        return output
+    }
+
+    /// Find the default LLM model path.
+    static func defaultLlmPath() -> String? {
+        let llmDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Byblos/llm-models")
+        try? FileManager.default.createDirectory(atPath: llmDir.path, withIntermediateDirectories: true)
+
+        // Look for any .gguf file.
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: llmDir.path) else {
+            return nil
+        }
+        if let gguf = files.first(where: { $0.hasSuffix(".gguf") }) {
+            return llmDir.appendingPathComponent(gguf).path
+        }
+        return nil
+    }
+
     /// Find the default model path.
     static func defaultModelPath() -> String? {
         let modelsDir = FileManager.default.homeDirectoryForCurrentUser

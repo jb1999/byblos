@@ -89,6 +89,28 @@ bool byblos_load_model(struct ByblosHandle *handle, const char *model_path, cons
 uint64_t byblos_get_transcription_time_ms(const struct ByblosHandle *handle);
 
 /**
+ * Load a local LLM model (GGUF format) for text post-processing.
+ *
+ * Call this after `byblos_create` to enable LLM-powered dictation modes.
+ * Returns true on success, false on failure.
+ */
+bool byblos_load_llm(struct ByblosHandle *handle, const char *model_path);
+
+/**
+ * Process text through the local LLM with a system prompt.
+ *
+ * Returns the processed text as a C string. Caller must free with `byblos_free_string`.
+ * Returns null if no LLM is loaded or processing fails.
+ * Falls back to returning the original text if LLM is not available.
+ */
+char *byblos_process_text(struct ByblosHandle *handle, const char *text, const char *system_prompt);
+
+/**
+ * Check if a local LLM is loaded.
+ */
+bool byblos_has_llm(const struct ByblosHandle *handle);
+
+/**
  * Destroy a Byblos instance and free all resources.
  */
 void byblos_destroy(struct ByblosHandle *handle);

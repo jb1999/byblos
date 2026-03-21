@@ -33,12 +33,14 @@ enum Log {
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var overlayWindow: OverlayWindow?
+    private var transcriptWindow: TranscriptWindow?
     private var hotkeyService: HotkeyService!
     private var accessibilityService: AccessibilityService!
     private var engine: ByblosEngine?
     private var isRecording = false
     private var previousApp: NSRunningApplication?
     private var lastTranscriptionTime: Double?
+    private var recordingStartTime: CFAbsoluteTime = 0
     private var streamingTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -61,6 +63,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let language = UserDefaults.standard.string(forKey: "language") ?? "en"
         Log.info("Loading model from: \(modelPath), language: \(language)")
         engine = ByblosEngine(modelPath: modelPath, language: language)
+
+        // Try to load a local LLM for text post-processing.
+        if let llmPath = ByblosEngine.defaultLlmPath() {
+            Log.info("Loading LLM from: \(llmPath)")
+            if engine?.loadLlm(path: llmPath) == true {
+                Log.info("LLM loaded successfully")
+            } else {
+                Log.error("Failed to load LLM from \(llmPath)")
+            }
+        } else {
+            Log.info("No LLM model found — dictation modes will use basic text processing")
+        }
     }
 
     // MARK: - Menu Bar
@@ -131,6 +145,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Dictation mode submenu.
+        let currentModeId = UserDefaults.standard.string(forKey: "dictationMode") ?? "clean"
+        let currentMode = DictationMode.mode(forId: currentModeId)
+        let modeItem = NSMenuItem(title: "Mode: \(currentMode.name)", action: nil, keyEquivalent: "")
+        let modeSubmenu = NSMenu()
+        for mode in DictationMode.allModes {
+            let item = NSMenuItem(title: mode.name, action: #selector(menuSelectMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.id
+            item.image = NSImage(systemSymbolName: mode.icon, accessibilityDescription: mode.name)
+            if mode.id == currentModeId {
+                item.state = .on
+            }
+            modeSubmenu.addItem(item)
+        }
+        modeItem.submenu = modeSubmenu
+        menu.addItem(modeItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let transcriptItem = NSMenuItem(
+            title: "Show Transcripts",
+            action: #selector(menuShowTranscripts),
+            keyEquivalent: "t"
+        )
+        transcriptItem.keyEquivalentModifierMask = .command
+        transcriptItem.target = self
+        menu.addItem(transcriptItem)
+
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(menuOpenSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
@@ -147,7 +190,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         toggleRecording()
     }
     @objc private func menuOpenSettings() { openSettings() }
+    @objc private func menuShowTranscripts() { openTranscriptWindow() }
     @objc private func menuQuit() { NSApp.terminate(nil) }
+
+    @objc private func menuSelectMode(_ sender: NSMenuItem) {
+        guard let modeId = sender.representedObject as? String else { return }
+        UserDefaults.standard.set(modeId, forKey: "dictationMode")
+        Log.info("Dictation mode changed to: \(modeId)")
+        rebuildMenu()
+    }
 
     @objc private func menuToggleLaunchAtLogin() {
         let service = SMAppService.mainApp
@@ -189,6 +240,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }) ?? NSWorkspace.shared.frontmostApplication
 
         isRecording = true
+        recordingStartTime = CFAbsoluteTimeGetCurrent()
         updateMenuBarIcon()
         rebuildMenu()
         showOverlay()
@@ -231,6 +283,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         stopStreamingPolling()
         let recordingStopTime = CFAbsoluteTimeGetCurrent()
+        let recordingDuration = recordingStopTime - recordingStartTime
 
         isRecording = false
         updateMenuBarIcon()
@@ -257,11 +310,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ? .clipboard
             : .accessibilityFirst
 
+        // Get dictation mode for post-processing.
+        let dictationModeId = UserDefaults.standard.string(forKey: "dictationMode") ?? "clean"
+        let dictationMode = DictationMode.mode(forId: dictationModeId)
+        let postProcess = dictationMode.postProcess
+        let language = UserDefaults.standard.string(forKey: "language") ?? "en"
+        let appContext = targetApp?.localizedName
+
         // Run transcription on a background thread to keep UI responsive.
         let eng = engine
         let accessibility = accessibilityService!
         DispatchQueue.global(qos: .userInitiated).async {
-            let text = eng?.stopAndTranscribe()
+            let rawText = eng?.stopAndTranscribe()
             // Use engine-reported time if available, otherwise wall-clock.
             let engineMs = eng?.transcriptionTimeMs() ?? 0
             let elapsed: Double
@@ -271,6 +331,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 elapsed = CFAbsoluteTimeGetCurrent() - recordingStopTime
             }
 
+            // Apply dictation mode post-processing.
+            let processedText = rawText.map { postProcess($0) }
+
             DispatchQueue.main.async { [weak self] in
                 self?.hideOverlay()
                 self?.updateMenuBarIcon()
@@ -278,13 +341,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.lastTranscriptionTime = elapsed
                 self?.rebuildMenu()
 
-                guard let text, !text.isEmpty else {
+                guard let rawText, !rawText.isEmpty else {
                     Log.info("No transcription result (empty or nil)")
                     return
                 }
 
-                Log.info("Transcribed (\(String(format: "%.1f", elapsed))s): \(text)")
-                accessibility.typeText(text, mode: outputMode)
+                let finalText = processedText ?? rawText
+                Log.info("Transcribed (\(String(format: "%.1f", elapsed))s): \(finalText)")
+
+                // Save to transcript store.
+                let entry = TranscriptEntry(
+                    text: finalText,
+                    rawText: rawText,
+                    mode: dictationModeId,
+                    duration: recordingDuration,
+                    language: language,
+                    appContext: appContext
+                )
+                TranscriptStore.shared.addEntry(entry)
+
+                accessibility.typeText(finalText, mode: outputMode)
             }
         }
     }
@@ -342,8 +418,105 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings
 
+    private var settingsWindow: NSWindow?
+
     private func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        // If we already have a settings window, just bring it forward.
+        if let existing = settingsWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        // Menu-bar-only apps (.accessory) cannot present windows that take focus.
+        // Temporarily become a regular app so the settings window appears properly.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+
+        // macOS 14+ uses showSettingsWindow:, macOS 13 uses showPreferencesWindow:.
+        if #available(macOS 14, *) {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        } else {
+            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+        }
+
+        // Track the settings window so we can observe when it closes.
+        // The Settings scene window typically appears after a brief run-loop cycle.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // Find the settings window (it will be the key window after the action).
+            let window = NSApp.windows.first(where: {
+                $0.isVisible && $0 !== self.overlayWindow
+            })
+            self.settingsWindow = window
+
+            if let window {
+                Log.info("Settings window opened")
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(self.settingsWindowWillClose(_:)),
+                    name: NSWindow.willCloseNotification,
+                    object: window
+                )
+            } else {
+                Log.error("Settings window not found — reverting to accessory mode")
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
+    }
+
+    @objc private func settingsWindowWillClose(_ notification: Notification) {
+        Log.info("Settings window closed — reverting to accessory mode")
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.willCloseNotification,
+            object: notification.object
+        )
+        settingsWindow = nil
+
+        // Only revert to accessory if transcript window is also closed.
+        if transcriptWindow == nil || !(transcriptWindow?.isVisible ?? false) {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+
+    // MARK: - Transcript Window
+
+    private func openTranscriptWindow() {
+        if let existing = transcriptWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+
+        if transcriptWindow == nil {
+            transcriptWindow = TranscriptWindow()
+        }
+        transcriptWindow?.makeKeyAndOrderFront(nil)
+        Log.info("Transcript window opened")
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(transcriptWindowWillClose(_:)),
+            name: NSWindow.willCloseNotification,
+            object: transcriptWindow
+        )
+    }
+
+    @objc private func transcriptWindowWillClose(_ notification: Notification) {
+        Log.info("Transcript window closed")
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.willCloseNotification,
+            object: notification.object
+        )
+
+        // Only revert to accessory if settings window is also closed.
+        if settingsWindow == nil || !(settingsWindow?.isVisible ?? false) {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }
