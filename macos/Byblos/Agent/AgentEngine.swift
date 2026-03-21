@@ -1,0 +1,218 @@
+import AppKit
+import Foundation
+
+/// The Byblos Agent — a voice-first personal AI that can understand
+/// context, search files, read the screen, and control apps.
+///
+/// Flow: voice → whisper → agent intent detection → action → response
+@MainActor
+class AgentEngine: ObservableObject {
+    static let shared = AgentEngine()
+
+    @Published var lastResponse: String = ""
+    @Published var isProcessing: Bool = false
+
+    /// System prompt that defines the agent's capabilities and response format.
+    private let systemPrompt = """
+    You are Byblos, a local AI assistant running on the user's Mac. You can:
+    1. READ_SCREEN - Read what's on the user's screen right now
+    2. SEARCH_FILES - Search for files on the computer
+    3. READ_FILE - Read the contents of a specific file
+    4. RUN_APPLESCRIPT - Control any Mac app via AppleScript
+    5. RUN_COMMAND - Run a shell command
+    6. CLIPBOARD_GET - Read the clipboard
+    7. CLIPBOARD_SET - Set the clipboard content
+    8. OPEN_APP - Open an application
+    9. NOTIFY - Show a notification
+    10. ANSWER - Just answer a question using context
+
+    IMPORTANT RULES:
+    - Respond with a JSON object containing "actions" (array) and "response" (string to show user).
+    - Each action has "type" (one of the above) and "params" (object with parameters).
+    - You can chain multiple actions. Results from earlier actions are available as context.
+    - Be concise in responses. The user is talking, not typing.
+    - Never run destructive commands (rm, delete, etc.) without explicit confirmation.
+    - If you just need to answer a question, use type "ANSWER" with no params.
+
+    Example response for "what's on my screen":
+    {"actions": [{"type": "READ_SCREEN", "params": {}}], "response": "Let me look at your screen."}
+
+    Example response for "find my resume":
+    {"actions": [{"type": "SEARCH_FILES", "params": {"query": "resume"}}], "response": "Searching for your resume..."}
+
+    Example response for "open safari and go to github":
+    {"actions": [{"type": "OPEN_APP", "params": {"name": "Safari"}}, {"type": "RUN_APPLESCRIPT", "params": {"script": "tell application \\"Safari\\" to set URL of current tab of front window to \\"https://github.com\\""}}], "response": "Opening GitHub in Safari."}
+
+    Example response for "what time is it":
+    {"actions": [{"type": "ANSWER", "params": {}}], "response": "It's currently [time]."}
+    """
+
+    /// Process a voice command through the agent.
+    func process(_ input: String) async -> String {
+        isProcessing = true
+        defer { isProcessing = false }
+
+        Log.info("[Agent] Processing: \(input)")
+
+        // Gather context.
+        var contextParts: [String] = []
+
+        // Current app context.
+        if let app = NSWorkspace.shared.frontmostApplication?.localizedName {
+            contextParts.append("Current app: \(app)")
+        }
+
+        // Clipboard content (brief).
+        let clipboard = NSPasteboard.general.string(forType: .string) ?? ""
+        if !clipboard.isEmpty {
+            let brief = clipboard.count > 200 ? String(clipboard.prefix(200)) + "..." : clipboard
+            contextParts.append("Clipboard: \(brief)")
+        }
+
+        // Time context.
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a"
+        contextParts.append("Current time: \(formatter.string(from: Date()))")
+
+        let context = contextParts.joined(separator: "\n")
+        let fullPrompt = "\(systemPrompt)\n\nCurrent context:\n\(context)\n\nUser said: \(input)"
+
+        // Send to LLM.
+        guard LlmService.shared.isReady else {
+            Log.info("[Agent] LLM not ready")
+            return "Agent mode requires the LLM model. It's either loading or not installed."
+        }
+
+        guard let llmResponse = await LlmService.shared.processText(input, systemPrompt: fullPrompt) else {
+            return "I couldn't process that. The LLM helper may be busy."
+        }
+
+        Log.info("[Agent] LLM response: \(llmResponse)")
+
+        // Parse the response.
+        let (actions, response) = parseResponse(llmResponse)
+
+        // Execute actions and gather results.
+        var actionResults: [String] = []
+        for action in actions {
+            let result = await executeAction(action)
+            actionResults.append(result)
+        }
+
+        // If we got action results, send them back to the LLM for a final response.
+        if !actionResults.isEmpty {
+            let resultsContext = actionResults.enumerated()
+                .map { "Action \($0 + 1) result: \($1)" }
+                .joined(separator: "\n")
+
+            let followUp = "The user asked: \(input)\n\nYou executed actions and got these results:\n\(resultsContext)\n\nGive a concise, helpful response summarizing what you found. Just the answer, nothing else."
+
+            if let finalResponse = await LlmService.shared.processText("", systemPrompt: followUp) {
+                lastResponse = finalResponse
+                return finalResponse
+            }
+        }
+
+        lastResponse = response
+        return response
+    }
+
+    // MARK: - Response Parsing
+
+    private struct AgentAction {
+        let type: String
+        let params: [String: String]
+    }
+
+    private func parseResponse(_ raw: String) -> ([AgentAction], String) {
+        // Try to parse as JSON.
+        guard let data = raw.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            // Not JSON — treat the whole thing as a plain text response.
+            return ([], raw)
+        }
+
+        var actions: [AgentAction] = []
+        if let actionsArray = json["actions"] as? [[String: Any]] {
+            for actionDict in actionsArray {
+                if let type = actionDict["type"] as? String {
+                    var params: [String: String] = [:]
+                    if let paramsDict = actionDict["params"] as? [String: Any] {
+                        for (key, value) in paramsDict {
+                            params[key] = "\(value)"
+                        }
+                    }
+                    actions.append(AgentAction(type: type, params: params))
+                }
+            }
+        }
+
+        let response = json["response"] as? String ?? raw
+        return (actions, response)
+    }
+
+    // MARK: - Action Execution
+
+    private func executeAction(_ action: AgentAction) async -> String {
+        Log.info("[Agent] Executing: \(action.type) \(action.params)")
+
+        switch action.type {
+        case "READ_SCREEN":
+            if let content = ScreenReader.readFrontmostWindow() {
+                return content.summary
+            }
+            return "Could not read screen content."
+
+        case "SEARCH_FILES":
+            let query = action.params["query"] ?? ""
+            let results = FileSearch.search(query: query)
+            if results.isEmpty {
+                return "No files found for '\(query)'."
+            }
+            return results.map { $0.description }.joined(separator: "\n")
+
+        case "READ_FILE":
+            let path = action.params["path"] ?? ""
+            if let content = FileSearch.readFile(at: path) {
+                return content
+            }
+            return "Could not read file at \(path)."
+
+        case "RUN_APPLESCRIPT":
+            let script = action.params["script"] ?? ""
+            let result = ScriptRunner.runAppleScript(script)
+            return result.description
+
+        case "RUN_COMMAND":
+            let command = action.params["command"] ?? ""
+            let result = ScriptRunner.runShellCommand(command)
+            return result.description
+
+        case "CLIPBOARD_GET":
+            return ScriptRunner.getClipboard()
+
+        case "CLIPBOARD_SET":
+            let text = action.params["text"] ?? ""
+            let result = ScriptRunner.setClipboard(text)
+            return result.description
+
+        case "OPEN_APP":
+            let name = action.params["name"] ?? ""
+            let result = ScriptRunner.openApp(name)
+            return result.description
+
+        case "NOTIFY":
+            let title = action.params["title"] ?? "Byblos"
+            let message = action.params["message"] ?? ""
+            let result = ScriptRunner.showNotification(title: title, message: message)
+            return result.description
+
+        case "ANSWER":
+            return "" // No action needed, just use the response text.
+
+        default:
+            return "Unknown action: \(action.type)"
+        }
+    }
+}

@@ -399,7 +399,50 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let finalText = processedText ?? rawText
                 Log.info("Transcribed (\(String(format: "%.1f", elapsed))s): \(finalText)")
 
-                // Save to transcript store.
+                // Agent mode: route to AgentEngine instead of typing.
+                if dictationModeId == "agent" {
+                    Log.info("[Agent] Routing to agent: \(rawText)")
+                    self?.overlayWindow?.updatePartialText("Thinking...")
+                    self?.overlayWindow?.show()
+                    Task {
+                        let response = await AgentEngine.shared.process(rawText)
+                        Log.info("[Agent] Response: \(response)")
+
+                        // Show response in overlay briefly, then copy to clipboard.
+                        self?.overlayWindow?.updatePartialText(response)
+
+                        // Save to transcript store.
+                        let entry = TranscriptEntry(
+                            text: "Q: \(rawText)\nA: \(response)",
+                            rawText: rawText,
+                            mode: "agent",
+                            duration: recordingDuration,
+                            language: language,
+                            appContext: appContext
+                        )
+                        TranscriptStore.shared.addEntry(entry)
+
+                        // Also type the response if it's short enough.
+                        if response.count < 500 {
+                            accessibility.typeText(response, mode: outputMode)
+                        } else {
+                            // For long responses, copy to clipboard and notify.
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(response, forType: .string)
+                            _ = ScriptRunner.showNotification(
+                                title: "Byblos Agent",
+                                message: "Response copied to clipboard (\(response.count) chars)"
+                            )
+                        }
+
+                        // Hide overlay after a delay.
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        self?.hideOverlay()
+                    }
+                    return
+                }
+
+                // Normal dictation mode: type text and save.
                 let entry = TranscriptEntry(
                     text: finalText,
                     rawText: rawText,
@@ -412,8 +455,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 accessibility.typeText(finalText, mode: outputMode)
 
-                // If LLM is available, re-process the text asynchronously
-                // and update the transcript entry with the improved version.
+                // If LLM is available, re-process the text asynchronously.
                 if LlmService.shared.isReady && !dictationMode.systemPrompt.isEmpty {
                     let entryId = entry.id
                     Task {

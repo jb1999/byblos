@@ -150,8 +150,17 @@ extension DictationMode {
         }
     )
 
+    static let agent = DictationMode(
+        id: "agent",
+        name: "Agent",
+        icon: "brain",
+        description: "AI agent that can read your screen, search files, and control apps.",
+        systemPrompt: "", // Agent mode uses its own prompt system.
+        postProcess: { $0 } // Agent mode bypasses normal post-processing.
+    )
+
     /// All built-in modes in display order.
-    static let allModes: [DictationMode] = [.raw, .clean, .email, .notes, .codeComment]
+    static let allModes: [DictationMode] = [.raw, .clean, .email, .notes, .codeComment, .agent]
 
     /// Look up a mode by its id. Falls back to `.clean` if not found.
     static func mode(forId id: String) -> DictationMode {
