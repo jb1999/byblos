@@ -1,0 +1,7 @@
+name = "whisper-medium-en"
+backend = "whisper"
+variant = "medium.en"
+description = "Whisper Medium English — high accuracy, slower on older hardware"
+size_bytes = 1_533_774_781
+url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin"
+sha256 = ""

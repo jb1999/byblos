@@ -363,12 +363,33 @@ struct ModelEntry: Identifiable {
             isDownloaded: false
         ),
         ModelEntry(
-            id: "moonshine-tiny",
-            displayName: "Moonshine Tiny",
-            description: "Ultra-fast, optimized for short utterances.",
-            sizeLabel: "60 MB",
-            downloadURL: "",
-            fileName: "moonshine-tiny.bin",
+            id: "whisper-large-v3",
+            displayName: "Whisper Large v3",
+            description: "Best accuracy, needs 3GB+ RAM.",
+            sizeLabel: "1.5 GB",
+            downloadURL:
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
+            fileName: "ggml-large-v3.bin",
+            isDownloaded: false
+        ),
+        ModelEntry(
+            id: "whisper-turbo",
+            displayName: "Whisper Turbo",
+            description: "Fast and accurate. Best for Apple Silicon.",
+            sizeLabel: "809 MB",
+            downloadURL:
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+            fileName: "ggml-large-v3-turbo.bin",
+            isDownloaded: false
+        ),
+        ModelEntry(
+            id: "distil-whisper-large-v3",
+            displayName: "Distil-Whisper Large v3",
+            description: "6x faster than large, near-large quality.",
+            sizeLabel: "756 MB",
+            downloadURL:
+                "https://huggingface.co/distil-whisper/distil-large-v3-ggml/resolve/main/ggml-distil-large-v3.bin",
+            fileName: "ggml-distil-large-v3.bin",
             isDownloaded: false
         ),
     ]

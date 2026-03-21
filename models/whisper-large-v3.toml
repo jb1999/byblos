@@ -1,0 +1,7 @@
+name = "whisper-large-v3"
+backend = "whisper"
+variant = "large-v3"
+description = "Whisper Large v3 — best accuracy, needs 3GB+ RAM"
+size_bytes = 1_550_000_000
+url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
+sha256 = ""

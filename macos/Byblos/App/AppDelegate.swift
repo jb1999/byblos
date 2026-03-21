@@ -46,6 +46,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let engineLock = NSLock()
     /// Last successful partial transcription — used as fallback if final transcription fails.
     private var lastPartialText: String = ""
+    private var onboardingController: OnboardingWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("Byblos starting up...")
@@ -55,6 +56,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupAccessibility()
         NSApp.setActivationPolicy(.accessory)
         Log.info("Byblos ready. Engine loaded: \(self.engine != nil)")
+
+        // Show onboarding on first launch.
+        if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
+            showOnboarding()
+        }
+    }
+
+    func showOnboarding() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+
+        if onboardingController == nil {
+            onboardingController = OnboardingWindowController()
+        }
+        onboardingController?.showOnboarding { [weak self] in
+            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+            Log.info("Onboarding completed")
+            self?.onboardingController?.close()
+            self?.onboardingController = nil
+
+            // Reload engine in case a model was downloaded during onboarding.
+            self?.setupEngine()
+
+            // Revert to accessory mode unless other windows are open.
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     // MARK: - Engine

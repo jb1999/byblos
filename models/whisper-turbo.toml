@@ -1,0 +1,7 @@
+name = "whisper-large-v3-turbo"
+backend = "whisper"
+variant = "large-v3-turbo"
+description = "Whisper Turbo — fast and accurate, best for Apple Silicon"
+size_bytes = 848_297_984
+url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+sha256 = ""

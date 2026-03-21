@@ -137,7 +137,7 @@ struct SettingsView: View {
             Text("Local voice-to-text")
                 .foregroundStyle(.secondary)
 
-            Text("v0.1.0")
+            Text("Version \(appVersion)")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
 
@@ -160,7 +160,29 @@ struct SettingsView: View {
                     .font(.callout)
                     .padding(.top, 4)
             }
+
+            Divider()
+
+            HStack(spacing: 16) {
+                Button("Re-run Setup") {
+                    UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
+                    // Access AppDelegate to show onboarding.
+                    if let appDelegate = NSApp.delegate as? AppDelegate {
+                        appDelegate.showOnboarding()
+                    }
+                }
+                .controlSize(.small)
+
+                Link("GitHub", destination: URL(string: "https://github.com/nicholasgasior/byblos")!)
+                    .font(.callout)
+            }
         }
         .padding()
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (\(build))"
     }
 }

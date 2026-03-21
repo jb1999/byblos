@@ -1,0 +1,7 @@
+name = "distil-whisper-large-v3"
+backend = "whisper"
+variant = "distil-large-v3"
+description = "Distil-Whisper Large v3 — 6x faster than large, near-large quality"
+size_bytes = 792_723_456
+url = "https://huggingface.co/distil-whisper/distil-large-v3-ggml/resolve/main/ggml-distil-large-v3.bin"
+sha256 = ""

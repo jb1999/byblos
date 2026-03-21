@@ -1,0 +1,356 @@
+import AVFoundation
+import SwiftUI
+
+/// Multi-step onboarding shown on first launch.
+struct OnboardingView: View {
+    @State private var currentStep = 0
+    @State private var micGranted = false
+    @State private var checkingMic = false
+    @StateObject private var downloader = ModelDownloader()
+    @State private var selectedModelId: String?
+    @State private var downloadComplete = false
+
+    var onComplete: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Step content
+            Group {
+                switch currentStep {
+                case 0: welcomeStep
+                case 1: microphoneStep
+                case 2: modelStep
+                case 3: readyStep
+                default: EmptyView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Step indicators
+            HStack(spacing: 8) {
+                ForEach(0..<4, id: \.self) { index in
+                    Circle()
+                        .fill(index == currentStep ? Color.accentColor : Color.gray.opacity(0.3))
+                        .frame(width: 8, height: 8)
+                }
+            }
+            .padding(.bottom, 20)
+        }
+        .frame(width: 500, height: 400)
+    }
+
+    // MARK: - Step 1: Welcome
+
+    private var welcomeStep: some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            Image(systemName: "waveform")
+                .font(.system(size: 48))
+                .foregroundStyle(Color.accentColor)
+
+            Text("Welcome to Byblos")
+                .font(.largeTitle.bold())
+
+            Text("Local voice-to-text. Private. Fast.")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+
+            Text("Your voice never leaves your machine.")
+                .font(.callout)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 4)
+
+            Spacer()
+
+            Button("Get Started") {
+                withAnimation { currentStep = 1 }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.bottom, 12)
+        }
+        .padding()
+    }
+
+    // MARK: - Step 2: Microphone Permission
+
+    private var microphoneStep: some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            Image(systemName: micGranted ? "checkmark.circle.fill" : "mic.circle")
+                .font(.system(size: 48))
+                .foregroundStyle(micGranted ? .green : .accentColor)
+
+            Text("Microphone Access")
+                .font(.title2.bold())
+
+            Text("Byblos needs access to your microphone to transcribe your voice. Audio is processed entirely on your device.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+
+            if !micGranted {
+                Button(checkingMic ? "Requesting..." : "Grant Microphone Access") {
+                    requestMicAccess()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(checkingMic)
+            } else {
+                Label("Microphone access granted", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.callout)
+            }
+
+            Spacer()
+
+            Button("Continue") {
+                withAnimation { currentStep = 2 }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!micGranted)
+            .padding(.bottom, 12)
+        }
+        .padding()
+        .onAppear { checkCurrentMicStatus() }
+    }
+
+    // MARK: - Step 3: Download a Model
+
+    private var modelStep: some View {
+        VStack(spacing: 12) {
+            Text("Download a Model")
+                .font(.title2.bold())
+                .padding(.top, 20)
+
+            Text("Byblos needs a speech model to transcribe your voice.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            // Show only the three recommended models.
+            let onboardingModels = downloader.models.filter {
+                ["whisper-tiny", "whisper-base", "whisper-small"].contains($0.id)
+            }
+
+            VStack(spacing: 8) {
+                ForEach(onboardingModels) { model in
+                    modelRow(model)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
+
+            if let error = downloader.lastError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal)
+            }
+
+            Spacer()
+
+            Button("Continue") {
+                withAnimation { currentStep = 3 }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!downloadComplete)
+            .padding(.bottom, 12)
+        }
+        .padding()
+        .onReceive(downloader.objectWillChange) { _ in
+            // Check if any model is now downloaded after downloader updates.
+            DispatchQueue.main.async {
+                let hasAny = downloader.models.contains(where: {
+                    $0.isDownloaded && ["whisper-tiny", "whisper-base", "whisper-small"].contains($0.id)
+                })
+                if hasAny { downloadComplete = true }
+            }
+        }
+        .onAppear {
+            downloader.refreshModelStates()
+            let hasAny = downloader.models.contains(where: {
+                $0.isDownloaded && ["whisper-tiny", "whisper-base", "whisper-small"].contains($0.id)
+            })
+            if hasAny { downloadComplete = true }
+        }
+    }
+
+    private func modelRow(_ model: ModelEntry) -> some View {
+        let isRecommended = model.id == "whisper-base"
+        return HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(model.displayName)
+                        .font(.headline)
+                    if isRecommended {
+                        Text("Recommended")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                }
+                Text("\(model.sizeLabel) — \(model.description)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            if model.isDownloaded {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            } else if let progress = downloader.activeDownloads[model.id] {
+                VStack(spacing: 2) {
+                    ProgressView(value: progress.fractionCompleted)
+                        .frame(width: 70)
+                    Text(progress.statusText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Button {
+                    downloader.cancelDownload(id: model.id)
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button("Download") {
+                    selectedModelId = model.id
+                    downloader.downloadModel(id: model.id)
+                    // Auto-select this model for use.
+                    UserDefaults.standard.set(model.id, forKey: "selectedModel")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isRecommended ? Color.accentColor.opacity(0.05) : Color.clear)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isRecommended ? Color.accentColor.opacity(0.2) : Color.gray.opacity(0.15), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Step 4: Ready
+
+    private var readyStep: some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.green)
+
+            Text("You're All Set!")
+                .font(.title.bold())
+
+            Text("Click the waveform icon in your menu bar to start recording, or hold the Option key.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+
+            HStack(spacing: 12) {
+                Image(systemName: "waveform")
+                    .font(.title2)
+                    .foregroundStyle(Color.accentColor)
+                Text("Look for this icon in your menu bar")
+                    .font(.callout)
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.accentColor.opacity(0.08))
+            )
+
+            Spacer()
+
+            Button("Start Using Byblos") {
+                onComplete()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.bottom, 12)
+        }
+        .padding()
+    }
+
+    // MARK: - Mic Helpers
+
+    private func checkCurrentMicStatus() {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            micGranted = true
+        default:
+            micGranted = false
+        }
+    }
+
+    private func requestMicAccess() {
+        checkingMic = true
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            DispatchQueue.main.async {
+                micGranted = granted
+                checkingMic = false
+                if granted {
+                    Log.info("Microphone access granted via onboarding")
+                } else {
+                    Log.info("Microphone access denied via onboarding")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Onboarding Window
+
+@MainActor
+class OnboardingWindowController {
+    private var window: NSWindow?
+
+    func showOnboarding(completion: @escaping () -> Void) {
+        if let existing = window, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let onboardingView = OnboardingView {
+            completion()
+        }
+
+        let hostView = NSHostingView(rootView: onboardingView)
+        hostView.frame = NSRect(x: 0, y: 0, width: 500, height: 400)
+
+        let win = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        win.title = "Welcome to Byblos"
+        win.contentView = hostView
+        win.center()
+        win.isReleasedWhenClosed = false
+        window = win
+
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func close() {
+        window?.close()
+        window = nil
+    }
+}
