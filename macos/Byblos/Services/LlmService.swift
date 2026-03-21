@@ -134,15 +134,25 @@ class LlmService: ObservableObject {
     /// Process text through the LLM with a system prompt.
     /// Returns the processed text, or nil if LLM is not available.
     func processText(_ text: String, systemPrompt: String) async -> String? {
-        guard isReady else { return nil }
+        guard isReady else {
+            Log.info("[LLM] Not ready, returning nil")
+            return nil
+        }
+
+        // Wait if a previous request is still pending.
+        while pendingContinuation != nil {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
 
         return await withCheckedContinuation { continuation in
             pendingContinuation = continuation
+            Log.info("[LLM] Sending request: text=\(text.prefix(80))... prompt=\(systemPrompt.prefix(80))...")
             sendRequest(LlmRequest(method: "process", text: text, system_prompt: systemPrompt))
 
-            // Timeout after 15 seconds.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            // Timeout after 30 seconds.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
                 if let cont = self?.pendingContinuation {
+                    Log.info("[LLM] Request timed out")
                     self?.pendingContinuation = nil
                     cont.resume(returning: nil)
                 }

@@ -100,17 +100,27 @@ class AgentEngine: ObservableObject {
         }
 
         // If we got action results, send them back to the LLM for a final response.
-        if !actionResults.isEmpty {
-            let resultsContext = actionResults.enumerated()
-                .map { "Action \($0 + 1) result: \($1)" }
-                .joined(separator: "\n")
+        let nonEmptyResults = actionResults.filter { !$0.isEmpty }
+        if !nonEmptyResults.isEmpty {
+            let resultsContext = nonEmptyResults.enumerated()
+                .map { "Result \($0 + 1):\n\($1)" }
+                .joined(separator: "\n\n")
 
-            let followUp = "The user asked: \(input)\n\nYou executed actions and got these results:\n\(resultsContext)\n\nGive a concise, helpful response summarizing what you found. Just the answer, nothing else."
+            let summarizePrompt = "You are a helpful assistant. Summarize the following information concisely for the user. Just give the answer, no preamble."
+            let summarizeText = "User asked: \(input)\n\nHere is what I found:\n\(resultsContext)"
 
-            if let finalResponse = await LlmService.shared.processText("", systemPrompt: followUp) {
+            // Small delay to ensure LLM helper is ready for next request.
+            try? await Task.sleep(nanoseconds: 500_000_000)
+
+            if let finalResponse = await LlmService.shared.processText(summarizeText, systemPrompt: summarizePrompt),
+               !finalResponse.isEmpty {
                 lastResponse = finalResponse
                 return finalResponse
             }
+
+            // If LLM follow-up fails, return the raw results.
+            lastResponse = resultsContext
+            return resultsContext
         }
 
         lastResponse = response
@@ -159,10 +169,23 @@ class AgentEngine: ObservableObject {
 
         switch action.type {
         case "READ_SCREEN":
-            if let content = ScreenReader.readFrontmostWindow() {
+            // Try the frontmost window first.
+            if let content = ScreenReader.readFrontmostWindow(), !content.text.isEmpty {
+                Log.info("[Agent] Screen read: \(content.appName) - \(content.windowTitle) (\(content.text.count) chars)")
                 return content.summary
             }
-            return "Could not read screen content."
+            // If frontmost is Byblos itself, try reading selected text or list windows.
+            if let selected = ScreenReader.readSelectedText(), !selected.isEmpty {
+                Log.info("[Agent] Read selected text: \(selected.count) chars")
+                return "Selected text: \(selected)"
+            }
+            let windows = ScreenReader.listWindows()
+            if !windows.isEmpty {
+                let listing = windows.prefix(10).map { "\($0.appName): \($0.windowTitle)" }.joined(separator: "\n")
+                Log.info("[Agent] Listed \(windows.count) windows")
+                return "Open windows:\n\(listing)"
+            }
+            return "Could not read screen content. Make sure Accessibility permission is granted."
 
         case "SEARCH_FILES":
             let query = action.params["query"] ?? ""
