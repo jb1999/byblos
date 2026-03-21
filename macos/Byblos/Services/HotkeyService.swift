@@ -1,6 +1,18 @@
 import AppKit
 import Carbon.HIToolbox
 
+/// Supported modifier keys for hold-to-record.
+enum HotkeyModifier: String {
+    case option = "option"
+    case control = "control"
+    case fn = "fn"
+
+    /// Convert an `@AppStorage("hotkeyModifier")` string to a `HotkeyModifier`.
+    static func from(setting: String) -> HotkeyModifier {
+        HotkeyModifier(rawValue: setting) ?? .option
+    }
+}
+
 /// Global hotkey service using CGEvent tap.
 ///
 /// Listens for modifier key press/release to implement hold-to-record.
@@ -16,7 +28,10 @@ final class HotkeyService: @unchecked Sendable {
     private var isHotkeyHeld = false
 
     /// The modifier key to use for hold-to-record.
-    var modifierKey: CGEventFlags = .maskAlternate // Option key
+    var hotkeyModifier: HotkeyModifier = .option
+
+    /// The Fn key virtual keycode (63).
+    private static let fnKeyCode: Int64 = 63
 
     func register() {
         let eventMask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue)
@@ -33,7 +48,7 @@ final class HotkeyService: @unchecked Sendable {
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            print("Failed to create event tap. Accessibility permission required.")
+            Log.error("Failed to create event tap. Accessibility permission required.")
             return
         }
 
@@ -45,13 +60,29 @@ final class HotkeyService: @unchecked Sendable {
 
     private func handleEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .flagsChanged {
-            let flags = event.flags
+            let isPressed: Bool
+            let isReleased: Bool
 
-            if flags.contains(modifierKey) && !isHotkeyHeld {
+            switch hotkeyModifier {
+            case .option:
+                isPressed = event.flags.contains(.maskAlternate) && !isHotkeyHeld
+                isReleased = !event.flags.contains(.maskAlternate) && isHotkeyHeld
+            case .control:
+                isPressed = event.flags.contains(.maskControl) && !isHotkeyHeld
+                isReleased = !event.flags.contains(.maskControl) && isHotkeyHeld
+            case .fn:
+                // Fn key uses keycode 63 in flagsChanged events.
+                let keycode = event.getIntegerValueField(.keyboardEventKeycode)
+                let isFnKey = keycode == HotkeyService.fnKeyCode
+                isPressed = isFnKey && event.flags.contains(.maskSecondaryFn) && !isHotkeyHeld
+                isReleased = isFnKey && !event.flags.contains(.maskSecondaryFn) && isHotkeyHeld
+            }
+
+            if isPressed {
                 isHotkeyHeld = true
                 let callback = onHotkeyDown
                 DispatchQueue.main.async { callback?() }
-            } else if !flags.contains(modifierKey) && isHotkeyHeld {
+            } else if isReleased {
                 isHotkeyHeld = false
                 let callback = onHotkeyUp
                 DispatchQueue.main.async { callback?() }

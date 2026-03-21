@@ -1,11 +1,21 @@
 import AppKit
 import SwiftUI
 
-/// A small floating pill overlay that appears near the cursor during recording.
+/// Observable model for streaming transcription text.
+@MainActor
+class OverlayState: ObservableObject {
+    static let shared = OverlayState()
+    @Published var partialText: String = ""
+    @Published var isProcessing: Bool = false
+}
+
+/// A floating pill overlay that shows recording state and streaming text.
 class OverlayWindow: NSPanel {
+    private let state = OverlayState.shared
+
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 44),
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 80),
             styleMask: [.nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -19,56 +29,88 @@ class OverlayWindow: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         isMovableByWindowBackground = true
 
-        contentView = NSHostingView(rootView: OverlayContent())
+        contentView = NSHostingView(rootView: OverlayContent().environmentObject(state))
     }
 
     func show() {
-        // Position near the mouse cursor.
         let mouseLocation = NSEvent.mouseLocation
         let origin = NSPoint(
             x: mouseLocation.x - frame.width / 2,
-            y: mouseLocation.y + 20
+            y: mouseLocation.y + 30
         )
         setFrameOrigin(origin)
+        state.partialText = ""
+        state.isProcessing = false
         orderFrontRegardless()
     }
 
     func hide() {
         orderOut(nil)
     }
+
+    func updatePartialText(_ text: String) {
+        state.partialText = text
+    }
+
+    func setProcessing(_ processing: Bool) {
+        state.isProcessing = processing
+    }
 }
 
 struct OverlayContent: View {
+    @EnvironmentObject var state: OverlayState
     @State private var animationPhase: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Animated recording indicator
-            Circle()
-                .fill(Color.red)
-                .frame(width: 10, height: 10)
-                .opacity(0.5 + 0.5 * Foundation.sin(Double(animationPhase)))
+        VStack(alignment: .leading, spacing: 6) {
+            // Top bar: recording indicator
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(state.isProcessing ? Color.orange : Color.red)
+                    .frame(width: 10, height: 10)
+                    .opacity(state.isProcessing ? 1.0 : 0.5 + 0.5 * Foundation.sin(Double(animationPhase)))
 
-            // Waveform visualization placeholder
-            HStack(spacing: 2) {
-                ForEach(0..<12, id: \.self) { i in
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.white.opacity(0.8))
-                        .frame(
-                            width: 3,
-                            height: 4 + CGFloat.random(in: 0...16)
-                        )
+                if state.isProcessing {
+                    Text("Transcribing...")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                } else if state.partialText.isEmpty {
+                    // Waveform bars when no text yet
+                    HStack(spacing: 2) {
+                        ForEach(0..<12, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(Color.white.opacity(0.7))
+                                .frame(width: 3, height: 4 + CGFloat.random(in: 0...14))
+                        }
+                    }
+                    Text("Listening...")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                } else {
+                    Text("Listening...")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.5))
                 }
+
+                Spacer()
             }
 
-            Text("Listening...")
-                .font(.caption)
-                .foregroundStyle(.white)
+            // Streaming partial text
+            if !state.partialText.isEmpty {
+                Text(state.partialText)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white)
+                    .lineLimit(3)
+                    .truncationMode(.head)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .frame(minWidth: 200, maxWidth: 400)
+        .fixedSize()
         .background(
-            RoundedRectangle(cornerRadius: 22)
+            RoundedRectangle(cornerRadius: 16)
                 .fill(.ultraThinMaterial)
                 .environment(\.colorScheme, .dark)
         )

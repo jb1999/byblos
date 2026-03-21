@@ -1,6 +1,8 @@
 pub mod stream;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use anyhow::Result;
 
@@ -37,6 +39,9 @@ impl Default for PipelineConfig {
     }
 }
 
+/// C-compatible callback for streaming partial results.
+pub type PartialCallback = extern "C" fn(*const std::os::raw::c_char, *mut std::ffi::c_void);
+
 /// The main orchestrator: audio in → text out.
 pub struct Pipeline {
     capture: AudioCapture,
@@ -44,14 +49,24 @@ pub struct Pipeline {
     vad: Option<VoiceActivityDetector>,
     denoiser: Option<Denoiser>,
     config: PipelineConfig,
+    /// Duration of the last transcription in milliseconds.
+    last_transcription_ms: u64,
+    /// Flag to signal the streaming thread to stop.
+    streaming_stop: Arc<AtomicBool>,
+    /// Handle to the streaming thread.
+    streaming_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Pipeline {
     pub fn new(model_path: &Path) -> Result<Self> {
+        Self::with_language(model_path, "en")
+    }
+
+    pub fn with_language(model_path: &Path, language: &str) -> Result<Self> {
         let audio_config = AudioConfig::default();
         let capture = AudioCapture::new(audio_config.device.as_deref())?;
 
-        let model = WhisperModel::load(model_path, "en")?;
+        let model = WhisperModel::load(model_path, language)?;
 
         let vad = if audio_config.vad {
             Some(VoiceActivityDetector::new(audio_config.vad_threshold)?)
@@ -71,14 +86,73 @@ impl Pipeline {
             vad,
             denoiser,
             config: PipelineConfig::default(),
+            last_transcription_ms: 0,
+            streaming_stop: Arc::new(AtomicBool::new(false)),
+            streaming_thread: None,
         })
     }
 
+    /// Reload the model at runtime, optionally changing language.
+    pub fn reload_model(&mut self, model_path: &Path, language: &str) -> Result<()> {
+        let new_model = WhisperModel::load(model_path, language)?;
+        self.model = Box::new(new_model);
+        log::info!("Reloaded model from {:?} with language={}", model_path, language);
+        Ok(())
+    }
+
+    /// Get the duration of the last transcription in milliseconds.
+    pub fn last_transcription_ms(&self) -> u64 {
+        self.last_transcription_ms
+    }
+
     pub fn start_recording(&mut self) -> Result<()> {
+        self.streaming_stop.store(false, Ordering::SeqCst);
         self.capture.start()
     }
 
+    /// Start recording with streaming support.
+    /// Use `transcribe_snapshot()` to poll for partial results while recording.
+    /// Call `stop_and_transcribe()` to stop and get the final result.
+    pub fn start_streaming(
+        &mut self,
+        _callback: PartialCallback,
+        _user_data: *mut std::ffi::c_void,
+    ) -> Result<()> {
+        self.start_recording()
+    }
+
+    /// Transcribe a snapshot of the current audio without stopping recording.
+    /// Used for streaming partial results from the FFI layer.
+    pub fn transcribe_snapshot(&mut self) -> Result<String> {
+        let raw_audio = self.capture.snapshot();
+
+        if raw_audio.samples.is_empty() {
+            return Ok(String::new());
+        }
+
+        let audio = resample::to_16khz_mono(&raw_audio)?;
+
+        if audio.samples.is_empty() {
+            return Ok(String::new());
+        }
+
+        let result = self.model.transcribe(&audio.samples)?;
+        let mut output = result.text;
+
+        if self.config.post_process {
+            output = text::format::post_process(&output);
+        }
+
+        Ok(output)
+    }
+
     pub fn stop_and_transcribe(&mut self) -> Result<String> {
+        // Stop the streaming thread if running.
+        self.streaming_stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.streaming_thread.take() {
+            let _ = thread.join();
+        }
+
         let raw_audio = self.capture.stop()?;
 
         // Resample to 16kHz mono.
@@ -102,6 +176,7 @@ impl Pipeline {
 
         // Transcribe.
         let result = self.model.transcribe(&samples)?;
+        self.last_transcription_ms = result.duration_ms;
         let mut output = result.text;
 
         // Post-process.

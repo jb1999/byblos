@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 /// Simple file logger that always works, regardless of macOS log settings.
@@ -37,6 +38,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var engine: ByblosEngine?
     private var isRecording = false
     private var previousApp: NSRunningApplication?
+    private var lastTranscriptionTime: Double?
+    private var streamingTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("Byblos starting up...")
@@ -55,8 +58,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Log.error("No model found. Run: ./scripts/download-model.sh whisper-base-en")
             return
         }
-        Log.info("Loading model from: \(modelPath)")
-        engine = ByblosEngine(modelPath: modelPath)
+        let language = UserDefaults.standard.string(forKey: "language") ?? "en"
+        Log.info("Loading model from: \(modelPath), language: \(language)")
+        engine = ByblosEngine(modelPath: modelPath, language: language)
     }
 
     // MARK: - Menu Bar
@@ -65,6 +69,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateMenuBarIcon()
         rebuildMenu()
+    }
+
+    private var currentModelDisplayName: String {
+        let selectedModel = UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-base"
+        let names: [String: String] = [
+            "whisper-tiny": "Whisper Tiny",
+            "whisper-base": "Whisper Base",
+            "whisper-small": "Whisper Small",
+            "whisper-medium": "Whisper Medium",
+            "distil-whisper": "Distil-Whisper",
+            "moonshine-tiny": "Moonshine Tiny",
+        ]
+        return names[selectedModel] ?? selectedModel
     }
 
     private func rebuildMenu() {
@@ -78,17 +95,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Status info: model name + recording state.
         let statusText: String
         if isRecording {
             statusText = "Recording..."
         } else if engine != nil {
-            statusText = "Ready — Whisper Base"
+            statusText = "Ready — \(currentModelDisplayName)"
         } else {
             statusText = "No model loaded"
         }
         let statusInfo = NSMenuItem(title: statusText, action: nil, keyEquivalent: "")
         statusInfo.isEnabled = false
         menu.addItem(statusInfo)
+
+        // Show last transcription time if available.
+        if let lastTime = lastTranscriptionTime {
+            let timeStr = String(format: "%.1f", lastTime)
+            let timeItem = NSMenuItem(title: "Last: \(timeStr)s", action: nil, keyEquivalent: "")
+            timeItem.isEnabled = false
+            menu.addItem(timeItem)
+        }
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Launch at Login toggle.
+        let launchAtLogin = SMAppService.mainApp.status == .enabled
+        let loginItem = NSMenuItem(
+            title: "Launch at Login",
+            action: #selector(menuToggleLaunchAtLogin),
+            keyEquivalent: ""
+        )
+        loginItem.target = self
+        loginItem.state = launchAtLogin ? .on : .off
+        menu.addItem(loginItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -109,6 +148,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc private func menuOpenSettings() { openSettings() }
     @objc private func menuQuit() { NSApp.terminate(nil) }
+
+    @objc private func menuToggleLaunchAtLogin() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled {
+                try service.unregister()
+                Log.info("Unregistered launch at login")
+            } else {
+                try service.register()
+                Log.info("Registered launch at login")
+            }
+        } catch {
+            Log.error("Failed to toggle launch at login: \(error)")
+        }
+        rebuildMenu()
+    }
 
     // MARK: - Recording
 
@@ -146,16 +201,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             hideOverlay()
         } else {
             Log.info("Recording started. Previous app: \(self.previousApp?.localizedName ?? "none")")
+            startStreamingPolling()
         }
+    }
+
+    private func startStreamingPolling() {
+        streamingTimer?.invalidate()
+        // Poll for partial transcription every 2 seconds.
+        streamingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let eng = self.engine
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let partial = eng?.transcribeSnapshot(), !partial.isEmpty else { return }
+                DispatchQueue.main.async {
+                    self.overlayWindow?.updatePartialText(partial)
+                    Log.info("Partial: \(partial)")
+                }
+            }
+        }
+    }
+
+    private func stopStreamingPolling() {
+        streamingTimer?.invalidate()
+        streamingTimer = nil
     }
 
     private func stopRecording() {
         guard isRecording else { return }
 
+        stopStreamingPolling()
+        let recordingStopTime = CFAbsoluteTimeGetCurrent()
+
         isRecording = false
         updateMenuBarIcon()
         rebuildMenu()
-        hideOverlay()
+        overlayWindow?.setProcessing(true)
         Log.info("Recording stopped, transcribing...")
 
         // Show a processing indicator.
@@ -171,23 +251,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             app.activate()
         }
 
+        // Determine the output mode from settings.
+        let outputModeSetting = UserDefaults.standard.string(forKey: "outputMode") ?? "type"
+        let outputMode: AccessibilityService.OutputMode = outputModeSetting == "clipboard"
+            ? .clipboard
+            : .accessibilityFirst
+
         // Run transcription on a background thread to keep UI responsive.
         let eng = engine
         let accessibility = accessibilityService!
         DispatchQueue.global(qos: .userInitiated).async {
             let text = eng?.stopAndTranscribe()
+            // Use engine-reported time if available, otherwise wall-clock.
+            let engineMs = eng?.transcriptionTimeMs() ?? 0
+            let elapsed: Double
+            if engineMs > 0 {
+                elapsed = Double(engineMs) / 1000.0
+            } else {
+                elapsed = CFAbsoluteTimeGetCurrent() - recordingStopTime
+            }
 
             DispatchQueue.main.async { [weak self] in
-                // Restore menu bar icon.
+                self?.hideOverlay()
                 self?.updateMenuBarIcon()
+
+                self?.lastTranscriptionTime = elapsed
+                self?.rebuildMenu()
 
                 guard let text, !text.isEmpty else {
                     Log.info("No transcription result (empty or nil)")
                     return
                 }
 
-                Log.info("Transcribed: \(text)")
-                accessibility.typeText(text)
+                Log.info("Transcribed (\(String(format: "%.1f", elapsed))s): \(text)")
+                accessibility.typeText(text, mode: outputMode)
             }
         }
     }
@@ -224,7 +321,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        let modifierSetting = UserDefaults.standard.string(forKey: "hotkeyModifier") ?? "option"
+        let modifier = HotkeyModifier.from(setting: modifierSetting)
+
         hotkeyService = HotkeyService()
+        hotkeyService.hotkeyModifier = modifier
         hotkeyService.onHotkeyDown = { [weak self] in
             DispatchQueue.main.async { self?.startRecording() }
         }
@@ -232,7 +333,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { self?.stopRecording() }
         }
         hotkeyService.register()
-        Log.info("Hotkey registered (hold Option to record)")
+        Log.info("Hotkey registered (hold \(modifierSetting) to record)")
     }
 
     private func setupAccessibility() {

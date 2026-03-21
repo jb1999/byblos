@@ -5,13 +5,22 @@ import Foundation
 class ByblosEngine {
     private var handle: OpaquePointer?
 
-    init?(modelPath: String) {
-        guard let h = modelPath.withCString({ byblos_create($0) }) else {
+    init?(modelPath: String, language: String? = nil) {
+        let h: OpaquePointer? = modelPath.withCString { pathPtr in
+            if let language {
+                return language.withCString { langPtr in
+                    byblos_create(pathPtr, langPtr)
+                }
+            } else {
+                return byblos_create(pathPtr, nil)
+            }
+        }
+        guard let h else {
             Log.info("[ByblosEngine] Failed to create engine for model: \(modelPath)")
             return nil
         }
         handle = h
-        Log.info("[ByblosEngine] Loaded model: \(modelPath)")
+        Log.info("[ByblosEngine] Loaded model: \(modelPath) language: \(language ?? "en")")
     }
 
     deinit {
@@ -37,6 +46,36 @@ class ByblosEngine {
         byblos_free_string(cStr)
         Log.info("[ByblosEngine] Transcribed: \(result)")
         return result
+    }
+
+    /// Load a different model at runtime.
+    func loadModel(path: String, language: String? = nil) -> Bool {
+        guard let handle else { return false }
+        return path.withCString { pathPtr in
+            if let language {
+                return language.withCString { langPtr in
+                    byblos_load_model(handle, pathPtr, langPtr)
+                }
+            } else {
+                return byblos_load_model(handle, pathPtr, nil)
+            }
+        }
+    }
+
+    /// Transcribe a snapshot of current recording without stopping it.
+    /// Returns partial transcription text, or nil.
+    func transcribeSnapshot() -> String? {
+        guard let handle else { return nil }
+        guard let cStr = byblos_transcribe_snapshot(handle) else { return nil }
+        let result = String(cString: cStr)
+        byblos_free_string(cStr)
+        return result
+    }
+
+    /// Get the duration of the last transcription in milliseconds.
+    func transcriptionTimeMs() -> UInt64 {
+        guard let handle else { return 0 }
+        return byblos_get_transcription_time_ms(handle)
     }
 
     /// Find the default model path.

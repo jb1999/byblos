@@ -14,12 +14,16 @@ pub struct ByblosHandle {
     pipeline: Pipeline,
 }
 
-/// Create a new Byblos instance with the given model path.
+/// Create a new Byblos instance with the given model path and language.
 ///
+/// `language` is a language code (e.g. "en", "fr", "auto"). Pass null for default ("en").
 /// Returns a pointer to the handle, or null on failure.
 /// Caller must eventually call `byblos_destroy` to free.
 #[unsafe(no_mangle)]
-pub extern "C" fn byblos_create(model_path: *const c_char) -> *mut ByblosHandle {
+pub extern "C" fn byblos_create(
+    model_path: *const c_char,
+    language: *const c_char,
+) -> *mut ByblosHandle {
     let path = unsafe {
         if model_path.is_null() {
             return ptr::null_mut();
@@ -30,7 +34,18 @@ pub extern "C" fn byblos_create(model_path: *const c_char) -> *mut ByblosHandle 
         }
     };
 
-    match Pipeline::new(path.as_ref()) {
+    let lang = if language.is_null() {
+        "en"
+    } else {
+        unsafe {
+            match CStr::from_ptr(language).to_str() {
+                Ok(s) => s,
+                Err(_) => "en",
+            }
+        }
+    };
+
+    match Pipeline::with_language(path.as_ref(), lang) {
         Ok(pipeline) => Box::into_raw(Box::new(ByblosHandle { pipeline })),
         Err(e) => {
             log::error!("Failed to create pipeline: {e}");
@@ -72,6 +87,57 @@ pub extern "C" fn byblos_stop_recording(handle: *mut ByblosHandle) -> *mut c_cha
     }
 }
 
+/// Callback type for streaming partial results.
+/// `text` is a temporary C string (only valid during the call).
+/// `user_data` is the opaque pointer passed to `byblos_start_streaming`.
+pub type ByblosPartialCallback =
+    extern "C" fn(text: *const c_char, user_data: *mut std::ffi::c_void);
+
+/// Start recording with streaming partial results.
+///
+/// The callback will be called periodically on a background thread with
+/// partial transcription text. Call `byblos_stop_recording` to stop and
+/// get the final result.
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_start_streaming(
+    handle: *mut ByblosHandle,
+    callback: ByblosPartialCallback,
+    user_data: *mut std::ffi::c_void,
+) -> bool {
+    let handle = unsafe {
+        if handle.is_null() {
+            return false;
+        }
+        &mut *handle
+    };
+    handle
+        .pipeline
+        .start_streaming(callback, user_data)
+        .is_ok()
+}
+
+/// Transcribe a snapshot of the current recording without stopping it.
+///
+/// Returns the partial transcription as a C string.
+/// Caller must free with `byblos_free_string`.
+/// Returns null if no audio or transcription fails.
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_transcribe_snapshot(handle: *mut ByblosHandle) -> *mut c_char {
+    let handle = unsafe {
+        if handle.is_null() {
+            return ptr::null_mut();
+        }
+        &mut *handle
+    };
+
+    match handle.pipeline.transcribe_snapshot() {
+        Ok(text) if !text.is_empty() => {
+            CString::new(text).map(|s| s.into_raw()).unwrap_or(ptr::null_mut())
+        }
+        _ => ptr::null_mut(),
+    }
+}
+
 /// Free a string returned by byblos functions.
 #[unsafe(no_mangle)]
 pub extern "C" fn byblos_free_string(s: *mut c_char) {
@@ -80,6 +146,67 @@ pub extern "C" fn byblos_free_string(s: *mut c_char) {
             drop(CString::from_raw(s));
         }
     }
+}
+
+/// Load a new model at runtime, replacing the current one.
+///
+/// `language` is a language code (e.g. "en", "fr", "auto"). Pass null for default ("en").
+/// Returns true on success, false on failure.
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_load_model(
+    handle: *mut ByblosHandle,
+    model_path: *const c_char,
+    language: *const c_char,
+) -> bool {
+    let handle = unsafe {
+        if handle.is_null() {
+            return false;
+        }
+        &mut *handle
+    };
+
+    let path = unsafe {
+        if model_path.is_null() {
+            return false;
+        }
+        match CStr::from_ptr(model_path).to_str() {
+            Ok(s) => s,
+            Err(_) => return false,
+        }
+    };
+
+    let lang = if language.is_null() {
+        "en"
+    } else {
+        unsafe {
+            match CStr::from_ptr(language).to_str() {
+                Ok(s) => s,
+                Err(_) => "en",
+            }
+        }
+    };
+
+    match handle.pipeline.reload_model(path.as_ref(), lang) {
+        Ok(()) => true,
+        Err(e) => {
+            log::error!("Failed to load model: {e}");
+            false
+        }
+    }
+}
+
+/// Get the duration of the last transcription in milliseconds.
+///
+/// Returns 0 if no transcription has been performed yet.
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_get_transcription_time_ms(handle: *const ByblosHandle) -> u64 {
+    let handle = unsafe {
+        if handle.is_null() {
+            return 0;
+        }
+        &*handle
+    };
+    handle.pipeline.last_transcription_ms()
 }
 
 /// Destroy a Byblos instance and free all resources.

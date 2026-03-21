@@ -21,12 +21,20 @@
 typedef struct ByblosHandle ByblosHandle;
 
 /**
- * Create a new Byblos instance with the given model path.
+ * Callback type for streaming partial results.
+ * `text` is a temporary C string (only valid during the call).
+ * `user_data` is the opaque pointer passed to `byblos_start_streaming`.
+ */
+typedef void (*ByblosPartialCallback)(const char *text, void *user_data);
+
+/**
+ * Create a new Byblos instance with the given model path and language.
  *
+ * `language` is a language code (e.g. "en", "fr", "auto"). Pass null for default ("en").
  * Returns a pointer to the handle, or null on failure.
  * Caller must eventually call `byblos_destroy` to free.
  */
-struct ByblosHandle *byblos_create(const char *model_path);
+struct ByblosHandle *byblos_create(const char *model_path, const char *language);
 
 /**
  * Start recording audio.
@@ -41,9 +49,44 @@ bool byblos_start_recording(struct ByblosHandle *handle);
 char *byblos_stop_recording(struct ByblosHandle *handle);
 
 /**
+ * Start recording with streaming partial results.
+ *
+ * The callback will be called periodically on a background thread with
+ * partial transcription text. Call `byblos_stop_recording` to stop and
+ * get the final result.
+ */
+bool byblos_start_streaming(struct ByblosHandle *handle,
+                            ByblosPartialCallback callback,
+                            void *user_data);
+
+/**
+ * Transcribe a snapshot of the current recording without stopping it.
+ *
+ * Returns the partial transcription as a C string.
+ * Caller must free with `byblos_free_string`.
+ * Returns null if no audio or transcription fails.
+ */
+char *byblos_transcribe_snapshot(struct ByblosHandle *handle);
+
+/**
  * Free a string returned by byblos functions.
  */
 void byblos_free_string(char *s);
+
+/**
+ * Load a new model at runtime, replacing the current one.
+ *
+ * `language` is a language code (e.g. "en", "fr", "auto"). Pass null for default ("en").
+ * Returns true on success, false on failure.
+ */
+bool byblos_load_model(struct ByblosHandle *handle, const char *model_path, const char *language);
+
+/**
+ * Get the duration of the last transcription in milliseconds.
+ *
+ * Returns 0 if no transcription has been performed yet.
+ */
+uint64_t byblos_get_transcription_time_ms(const struct ByblosHandle *handle);
 
 /**
  * Destroy a Byblos instance and free all resources.

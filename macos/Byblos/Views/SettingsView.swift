@@ -1,3 +1,4 @@
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
@@ -9,6 +10,10 @@ struct SettingsView: View {
     @AppStorage("autoCapitalize") private var autoCapitalize = true
     @AppStorage("language") private var language = "en"
     @AppStorage("outputMode") private var outputMode = "type"
+    @AppStorage("inputDevice") private var inputDevice = ""
+    @AppStorage("launchAtLogin") private var launchAtLogin = false
+
+    @StateObject private var audioService = AudioService()
 
     var body: some View {
         TabView {
@@ -24,7 +29,7 @@ struct SettingsView: View {
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 480, height: 360)
+        .frame(width: 480, height: 400)
     }
 
     // MARK: - General
@@ -45,9 +50,45 @@ struct SettingsView: View {
             Toggle("Voice commands", isOn: $voiceCommands)
             Toggle("Auto-capitalize", isOn: $autoCapitalize)
 
+            Toggle("Launch at Login", isOn: Binding(
+                get: {
+                    SMAppService.mainApp.status == .enabled
+                },
+                set: { newValue in
+                    do {
+                        if newValue {
+                            try SMAppService.mainApp.register()
+                            Log.info("Registered launch at login via Settings")
+                        } else {
+                            try SMAppService.mainApp.unregister()
+                            Log.info("Unregistered launch at login via Settings")
+                        }
+                        launchAtLogin = newValue
+                    } catch {
+                        Log.error("Failed to toggle launch at login: \(error)")
+                    }
+                }
+            ))
+
             Picker("Language", selection: $language) {
-                Text("English").tag("en")
                 Text("Auto-detect").tag("auto")
+                Text("English").tag("en")
+                Text("Spanish").tag("es")
+                Text("French").tag("fr")
+                Text("German").tag("de")
+                Text("Italian").tag("it")
+                Text("Portuguese").tag("pt")
+                Text("Japanese").tag("ja")
+                Text("Chinese").tag("zh")
+                Text("Korean").tag("ko")
+                Text("Russian").tag("ru")
+                Text("Arabic").tag("ar")
+                Text("Hindi").tag("hi")
+                Text("Dutch").tag("nl")
+                Text("Polish").tag("pl")
+                Text("Turkish").tag("tr")
+                Text("Ukrainian").tag("uk")
+                Text("Swedish").tag("sv")
             }
         }
         .padding()
@@ -56,32 +97,30 @@ struct SettingsView: View {
     // MARK: - Models
 
     private var modelsTab: some View {
-        Form {
-            Picker("Active model", selection: $selectedModel) {
-                Text("Whisper Tiny (75 MB)").tag("whisper-tiny")
-                Text("Whisper Base (142 MB)").tag("whisper-base")
-                Text("Whisper Small (466 MB)").tag("whisper-small")
-                Text("Whisper Medium (1.5 GB)").tag("whisper-medium")
-                Text("Distil-Whisper (756 MB)").tag("distil-whisper")
-                Text("Moonshine Tiny (60 MB)").tag("moonshine-tiny")
-            }
-
-            // TODO: Show download status, disk usage, benchmark results
-            Text("Model management coming soon")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding()
+        ModelManagerView()
+            .padding()
     }
 
     // MARK: - Audio
 
     private var audioTab: some View {
         Form {
+            Picker("Input device", selection: $inputDevice) {
+                Text("System Default").tag("")
+                ForEach(audioService.availableDevices) { device in
+                    Text(device.name + (device.isDefault ? " (Default)" : ""))
+                        .tag(device.id)
+                }
+            }
+
             Toggle("Noise suppression", isOn: $denoiseEnabled)
             Toggle("Voice activity detection", isOn: $vadEnabled)
 
-            // TODO: Input device picker
+            Button("Refresh Devices") {
+                audioService.refreshDevices()
+            }
+            .font(.caption)
+
             // TODO: VAD sensitivity slider
             // TODO: Audio level meter
         }

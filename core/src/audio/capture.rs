@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender};
@@ -8,6 +10,8 @@ use super::AudioBuffer;
 pub struct AudioCapture {
     stream: Option<cpal::Stream>,
     receiver: Option<Receiver<Vec<f32>>>,
+    /// Shared buffer for streaming — audio callback appends here continuously.
+    shared_buffer: Arc<Mutex<Vec<f32>>>,
     device_name: Option<String>,
     sample_rate: u32,
     channels: u16,
@@ -34,6 +38,7 @@ impl AudioCapture {
         Ok(Self {
             stream: None,
             receiver: None,
+            shared_buffer: Arc::new(Mutex::new(Vec::new())),
             device_name: device_name.map(|s| s.to_string()),
             sample_rate,
             channels,
@@ -67,14 +72,20 @@ impl AudioCapture {
         self.sample_rate = config.sample_rate().0;
         self.channels = config.channels();
 
-        // Fresh channel for each recording session.
+        // Fresh channel and buffer for each recording session.
         let (sender, receiver) = crossbeam_channel::unbounded();
         self.receiver = Some(receiver);
+        self.shared_buffer = Arc::new(Mutex::new(Vec::new()));
+        let shared_buf = self.shared_buffer.clone();
 
         let stream = device.build_input_stream(
             &config.into(),
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
                 let _ = sender.send(data.to_vec());
+                // Also append to shared buffer for streaming snapshots.
+                if let Ok(mut buf) = shared_buf.lock() {
+                    buf.extend_from_slice(data);
+                }
             },
             |err| {
                 log::error!("Audio capture error: {err}");
@@ -105,6 +116,26 @@ impl AudioCapture {
             buffer.samples.len()
         );
         Ok(buffer)
+    }
+
+    /// Get a reference to the shared audio buffer for use by streaming threads.
+    pub fn snapshot_buffer(&self) -> Arc<Mutex<Vec<f32>>> {
+        self.shared_buffer.clone()
+    }
+
+    /// Get a snapshot of all audio captured so far without stopping the stream.
+    /// Used for streaming partial transcription.
+    pub fn snapshot(&self) -> AudioBuffer {
+        let samples = self
+            .shared_buffer
+            .lock()
+            .map(|buf| buf.clone())
+            .unwrap_or_default();
+        AudioBuffer {
+            samples,
+            sample_rate: self.sample_rate,
+            channels: self.channels,
+        }
     }
 
     /// List available input devices.
