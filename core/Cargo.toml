@@ -50,7 +50,3 @@ metal = []
 
 [build-dependencies]
 cc = "1"
-
-[[bin]]
-name = "test-llm"
-path = "src/test_llm.rs"

@@ -158,14 +158,15 @@ extension DictationMode {
         allModes.first(where: { $0.id == id }) ?? .clean
     }
 
-    /// Process text using LLM if available, falling back to regex-based postProcess.
-    func apply(to text: String, engine: ByblosEngine?) -> String {
+    /// Process text using LLM helper if available, falling back to regex-based postProcess.
+    func apply(to text: String) async -> String {
         // Raw mode always passes through.
         if id == "raw" { return text }
 
-        // Try LLM if available and mode has a system prompt.
-        if let engine, engine.hasLlm, !systemPrompt.isEmpty {
-            if let result = engine.processText(text, systemPrompt: systemPrompt), !result.isEmpty {
+        // Try LLM helper process if available and mode has a system prompt.
+        let llm = await MainActor.run { LlmService.shared }
+        if await llm.isReady, !systemPrompt.isEmpty {
+            if let result = await llm.processText(text, systemPrompt: systemPrompt), !result.isEmpty {
                 return result
             }
         }

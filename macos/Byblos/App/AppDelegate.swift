@@ -99,6 +99,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let language = UserDefaults.standard.string(forKey: "language") ?? "en"
         Log.info("Loading model from: \(modelPath), language: \(language)")
         engine = ByblosEngine(modelPath: modelPath, language: language)
+
+        // Start the LLM helper process (separate process to avoid ggml-metal conflicts).
+        if LlmService.shared.isAvailable {
+            LlmService.shared.start()
+        }
     }
 
     // MARK: - Menu Bar
@@ -347,7 +352,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Get dictation mode for post-processing.
         let dictationModeId = UserDefaults.standard.string(forKey: "dictationMode") ?? "clean"
         let dictationMode = DictationMode.mode(forId: dictationModeId)
-        let postProcess = dictationMode.postProcess
         let language = UserDefaults.standard.string(forKey: "language") ?? "en"
         let appContext = targetApp?.localizedName
 
@@ -376,8 +380,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 elapsed = CFAbsoluteTimeGetCurrent() - recordingStopTime
             }
 
-            // Apply dictation mode post-processing.
-            let processedText = rawText.map { postProcess($0) }
+            // Apply regex-based post-processing synchronously.
+            // LLM processing happens asynchronously after typing.
+            let processedText = rawText.map { dictationMode.postProcess($0) }
 
             DispatchQueue.main.async { [weak self] in
                 self?.hideOverlay()
@@ -406,6 +411,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 TranscriptStore.shared.addEntry(entry)
 
                 accessibility.typeText(finalText, mode: outputMode)
+
+                // If LLM is available, re-process the text asynchronously
+                // and update the transcript entry with the improved version.
+                if LlmService.shared.isReady && !dictationMode.systemPrompt.isEmpty {
+                    let entryId = entry.id
+                    Task {
+                        if let improved = await LlmService.shared.processText(rawText, systemPrompt: dictationMode.systemPrompt) {
+                            Log.info("LLM improved: \(improved)")
+                            await MainActor.run {
+                                TranscriptStore.shared.updateText(for: entryId, newText: improved)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
