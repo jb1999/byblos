@@ -1,0 +1,7 @@
+name = "nemo-parakeet-ctc-0.6b"
+backend = "onnx"
+variant = "ctc-0.6b"
+description = "NVIDIA NeMo Parakeet CTC — fast non-autoregressive English model"
+size_bytes = 600_000_000
+url = "https://huggingface.co/nvidia/parakeet-ctc-0.6b/resolve/main/model.onnx"
+sha256 = ""

@@ -1,0 +1,28 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# macOS
+macos/Byblos.xcodeproj/
+macos/Byblos.app
+macos/build/
+macos/DerivedData/
+*.xcuserstate
+
+# Models (downloaded, not committed)
+models/*.bin
+models/*.ggml
+models/*.onnx
+models/*.pt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

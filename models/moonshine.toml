@@ -1,0 +1,7 @@
+name = "moonshine-tiny"
+backend = "onnx"
+variant = "tiny"
+description = "Moonshine Tiny — ultra-fast, optimized for short utterances"
+size_bytes = 62_000_000
+url = "https://huggingface.co/UsefulSensors/moonshine-tiny/resolve/main/moonshine-tiny.onnx"
+sha256 = ""
