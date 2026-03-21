@@ -23,8 +23,17 @@ struct ScreenReader {
     }
 
     /// Read the title and content of the frontmost window.
+    /// Skips Byblos itself and reads the app behind it.
     static func readFrontmostWindow() -> WindowContent? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        // Find the first non-Byblos app.
+        let myBundleId = Bundle.main.bundleIdentifier
+        let app = NSWorkspace.shared.runningApplications
+            .filter { $0.isActive || $0.activationPolicy == .regular }
+            .sorted { ($0.isActive ? 0 : 1) < ($1.isActive ? 0 : 1) }
+            .first { $0.bundleIdentifier != myBundleId && $0.activationPolicy == .regular }
+            ?? NSWorkspace.shared.frontmostApplication
+
+        guard let app else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
         // Get the focused window.

@@ -10,11 +10,12 @@ struct FileSearch {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
-        // Use -name for filename search, falling back to content search.
-        process.arguments = ["-limit", String(limit), "-name", trimmed]
+        process.arguments = ["-name", trimmed]
 
         let pipe = Pipe()
+        let errPipe = Pipe()
         process.standardOutput = pipe
+        process.standardError = errPipe
 
         do {
             try process.run()
@@ -24,12 +25,20 @@ struct FileSearch {
             return []
         }
 
+        guard process.terminationStatus == 0 else {
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            let errStr = String(data: errData, encoding: .utf8) ?? ""
+            Log.error("[FileSearch] mdfind error: \(errStr)")
+            return []
+        }
+
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: data, encoding: .utf8) else { return [] }
 
         return output
             .components(separatedBy: "\n")
             .filter { !$0.isEmpty }
+            .prefix(limit)
             .map { path in
                 let url = URL(fileURLWithPath: path)
                 let attrs = try? FileManager.default.attributesOfItem(atPath: path)
@@ -42,12 +51,14 @@ struct FileSearch {
             }
     }
 
-    /// Search for files by name pattern.
-    static func findByName(_ name: String, in directory: String = "~") -> [FileResult] {
-        let expandedDir = NSString(string: directory).expandingTildeInPath
+    /// Search for files by content (full-text search).
+    static func searchContent(query: String, limit: Int = 10) -> [FileResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
-        process.arguments = ["-onlyin", expandedDir, "kMDItemFSName == '*\(name)*'cd"]
+        process.arguments = [trimmed]
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -55,9 +66,9 @@ struct FileSearch {
         do {
             try process.run()
             process.waitUntilExit()
-        } catch {
-            return []
-        }
+        } catch { return [] }
+
+        guard process.terminationStatus == 0 else { return [] }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: data, encoding: .utf8) else { return [] }
@@ -65,13 +76,13 @@ struct FileSearch {
         return output
             .components(separatedBy: "\n")
             .filter { !$0.isEmpty }
-            .prefix(20)
+            .prefix(limit)
             .map { path in
                 FileResult(
                     path: path,
                     name: URL(fileURLWithPath: path).lastPathComponent,
-                    size: (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int64 ?? 0,
-                    modified: (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+                    size: 0,
+                    modified: nil
                 )
             }
     }
@@ -94,7 +105,6 @@ struct FileSearch {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
         process.arguments = [
-            "-limit", String(limit),
             "kMDItemFSContentChangeDate >= $time.now(-\(hours * 3600))",
         ]
 
@@ -104,9 +114,9 @@ struct FileSearch {
         do {
             try process.run()
             process.waitUntilExit()
-        } catch {
-            return []
-        }
+        } catch { return [] }
+
+        guard process.terminationStatus == 0 else { return [] }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: data, encoding: .utf8) else { return [] }
@@ -114,6 +124,7 @@ struct FileSearch {
         return output
             .components(separatedBy: "\n")
             .filter { !$0.isEmpty }
+            .prefix(limit)
             .map { path in
                 FileResult(
                     path: path,
@@ -132,7 +143,7 @@ struct FileResult {
     let modified: Date?
 
     var description: String {
-        var parts = [name, path]
+        var parts = [name]
         if size > 0 {
             parts.append(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
         }
@@ -140,6 +151,7 @@ struct FileResult {
             let fmt = RelativeDateTimeFormatter()
             parts.append(fmt.localizedString(for: mod, relativeTo: Date()))
         }
+        parts.append(path)
         return parts.joined(separator: " | ")
     }
 }
