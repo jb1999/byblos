@@ -47,6 +47,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Last successful partial transcription — used as fallback if final transcription fails.
     private var lastPartialText: String = ""
     private var onboardingController: OnboardingWindowController?
+    /// Tracks the last partial text for auto-stop silence detection.
+    private var previousPartialText: String = ""
+    /// Number of consecutive polling intervals where partial text didn't change.
+    private var unchangedPartialCount: Int = 0
+    /// Whether speech has been detected (partial text appeared at least once).
+    private var speechDetected: Bool = false
+
+    @AppStorage("autoStopEnabled") private var autoStopEnabled = true
+    @AppStorage("autoStopDelay") private var autoStopDelay: Double = 3.0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("Byblos starting up...")
@@ -57,10 +66,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         Log.info("Byblos ready. Engine loaded: \(self.engine != nil)")
 
+        // Observe toggle-recording notifications from TranscriptView / OverlayView.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleToggleRecordingNotification),
+            name: Notification.Name("ByblosToggleRecording"),
+            object: nil
+        )
+
         // Show onboarding on first launch.
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
             showOnboarding()
         }
+    }
+
+    @objc private func handleToggleRecordingNotification() {
+        toggleRecording()
     }
 
     func showOnboarding() {
@@ -111,7 +132,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateMenuBarIcon()
-        rebuildMenu()
+
+        // Left-click = toggle recording, right-click = show menu.
+        if let button = statusItem.button {
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.action = #selector(statusBarButtonClicked(_:))
+            button.target = self
+        }
+    }
+
+    @objc private func statusBarButtonClicked(_ sender: NSStatusBarButton) {
+        guard let event = NSApp.currentEvent else { return }
+        if event.type == .rightMouseUp {
+            // Show context menu on right-click.
+            let menu = buildMenu()
+            statusItem.menu = menu
+            statusItem.button?.performClick(nil)
+            statusItem.menu = nil
+        } else {
+            // Left-click: toggle recording directly.
+            toggleRecording()
+        }
     }
 
     private var currentModelDisplayName: String {
@@ -127,10 +168,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return names[selectedModel] ?? selectedModel
     }
 
-    private func rebuildMenu() {
+    private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
-        let recordTitle = isRecording ? "⏹ Stop Recording" : "⏺ Start Recording"
+        let recordTitle = isRecording ? "Stop Recording" : "Start Recording"
         let recordItem = NSMenuItem(title: recordTitle, action: #selector(menuToggleRecording), keyEquivalent: "")
         recordItem.target = self
         recordItem.isEnabled = engine != nil
@@ -194,6 +235,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Auto-stop toggle.
+        let autoStopItem = NSMenuItem(
+            title: "Auto-stop on Silence",
+            action: #selector(menuToggleAutoStop),
+            keyEquivalent: ""
+        )
+        autoStopItem.target = self
+        autoStopItem.state = autoStopEnabled ? .on : .off
+        menu.addItem(autoStopItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         let transcriptItem = NSMenuItem(
             title: "Show Transcripts",
             action: #selector(menuShowTranscripts),
@@ -211,7 +264,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
-        statusItem.menu = menu
+        return menu
+    }
+
+    @objc private func menuToggleAutoStop() {
+        autoStopEnabled.toggle()
+        Log.info("Auto-stop on silence: \(autoStopEnabled)")
     }
 
     @objc private func menuToggleRecording() {
@@ -226,7 +284,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let modeId = sender.representedObject as? String else { return }
         UserDefaults.standard.set(modeId, forKey: "dictationMode")
         Log.info("Dictation mode changed to: \(modeId)")
-        rebuildMenu()
     }
 
     @objc private func menuToggleLaunchAtLogin() {
@@ -242,7 +299,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             Log.error("Failed to toggle launch at login: \(error)")
         }
-        rebuildMenu()
     }
 
     // MARK: - Recording
@@ -270,15 +326,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         isRecording = true
         recordingStartTime = CFAbsoluteTimeGetCurrent()
+        speechDetected = false
+        previousPartialText = ""
+        unchangedPartialCount = 0
         updateMenuBarIcon()
-        rebuildMenu()
+        TranscriptRecordingState.shared.isRecording = true
+        TranscriptRecordingState.shared.partialText = ""
         showOverlay()
 
         if engine?.startRecording() != true {
             Log.error("Failed to start recording from engine")
             isRecording = false
             updateMenuBarIcon()
-            rebuildMenu()
+            TranscriptRecordingState.shared.isRecording = false
             hideOverlay()
         } else {
             Log.info("Recording started. Previous app: \(self.previousApp?.localizedName ?? "none")")
@@ -302,10 +362,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async {
                     self.overlayWindow?.updatePartialText(partial)
                     self.lastPartialText = partial
+                    TranscriptRecordingState.shared.partialText = partial
                     Log.info("Partial: \(partial)")
+
+                    // Auto-stop silence detection: if partial text hasn't changed,
+                    // speech may have ended.
+                    if self.autoStopEnabled && self.isRecording {
+                        self.checkAutoStop(currentPartial: partial)
+                    }
                 }
             }
         }
+    }
+
+    /// Checks if recording should auto-stop due to silence (no new transcription).
+    private func checkAutoStop(currentPartial: String) {
+        let elapsed = CFAbsoluteTimeGetCurrent() - recordingStartTime
+
+        // Mark that speech was detected once we get any partial text.
+        if !currentPartial.isEmpty {
+            speechDetected = true
+        }
+
+        // Don't auto-stop if we haven't recorded long enough or no speech detected.
+        guard speechDetected, elapsed >= 1.5 else {
+            previousPartialText = currentPartial
+            unchangedPartialCount = 0
+            return
+        }
+
+        if currentPartial == previousPartialText {
+            unchangedPartialCount += 1
+            // Each poll is 2 seconds. Auto-stop after enough unchanged polls.
+            // autoStopDelay is in seconds; convert to number of 2s polling intervals.
+            let requiredCount = max(1, Int(ceil(autoStopDelay / 2.0)))
+            if unchangedPartialCount >= requiredCount {
+                Log.info("Auto-stopping: no new speech for \(unchangedPartialCount * 2)s")
+                overlayWindow?.updatePartialText(currentPartial + "\n[Auto-stopping...]")
+                // Brief delay so user sees the indicator, then stop.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self, self.isRecording else { return }
+                    self.stopRecording()
+                }
+            }
+        } else {
+            unchangedPartialCount = 0
+        }
+        previousPartialText = currentPartial
     }
 
     private func stopStreamingPolling() {
@@ -326,7 +429,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         isRecording = false
         updateMenuBarIcon()
-        rebuildMenu()
+        TranscriptRecordingState.shared.isRecording = false
+        TranscriptRecordingState.shared.partialText = ""
         overlayWindow?.setProcessing(true)
         Log.info("Recording stopped, transcribing...")
 
@@ -389,7 +493,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.updateMenuBarIcon()
 
                 self?.lastTranscriptionTime = elapsed
-                self?.rebuildMenu()
 
                 guard let rawText, !rawText.isEmpty else {
                     Log.info("No transcription result (empty or nil)")

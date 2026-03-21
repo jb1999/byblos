@@ -158,8 +158,17 @@ class TranscriptWindow: NSWindow {
 
 // MARK: - Main View
 
+/// Observable state for the record button in TranscriptView.
+@MainActor
+class TranscriptRecordingState: ObservableObject {
+    static let shared = TranscriptRecordingState()
+    @Published var isRecording = false
+    @Published var partialText = ""
+}
+
 struct TranscriptView: View {
     @EnvironmentObject var store: TranscriptStore
+    @StateObject private var recordingState = TranscriptRecordingState.shared
 
     @State private var searchText = ""
     @State private var modeFilter: String?
@@ -186,18 +195,88 @@ struct TranscriptView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-                .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 350)
-        } detail: {
-            detailPanel
-        }
-        .searchable(text: $searchText, prompt: "Search transcripts")
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                modeFilterPicker
+        VStack(spacing: 0) {
+            NavigationSplitView {
+                sidebar
+                    .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 350)
+            } detail: {
+                detailPanel
             }
+            .searchable(text: $searchText, prompt: "Search transcripts")
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    modeFilterPicker
+                }
+            }
+
+            Divider()
+
+            // Bottom record bar
+            recordBar
         }
+    }
+
+    // MARK: - Record Bar
+
+    private var recordBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                NotificationCenter.default.post(
+                    name: Notification.Name("ByblosToggleRecording"),
+                    object: nil
+                )
+            } label: {
+                ZStack {
+                    if recordingState.isRecording {
+                        // Pulsing red background
+                        Circle()
+                            .fill(Color.red.opacity(0.2))
+                            .frame(width: 44, height: 44)
+
+                        // Stop square icon
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.red)
+                            .frame(width: 16, height: 16)
+                    } else {
+                        // Red record circle
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 20, height: 20)
+                    }
+                }
+                .frame(width: 44, height: 44)
+                .background(
+                    Circle()
+                        .stroke(Color.red.opacity(0.3), lineWidth: 2)
+                )
+            }
+            .buttonStyle(.plain)
+            .help(recordingState.isRecording ? "Stop Recording" : "Start Recording")
+
+            if recordingState.isRecording {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Recording...")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    if !recordingState.partialText.isEmpty {
+                        Text(recordingState.partialText)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+            } else {
+                Text("Click to record")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
     // MARK: - Sidebar

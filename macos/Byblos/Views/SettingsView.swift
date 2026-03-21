@@ -12,6 +12,8 @@ struct SettingsView: View {
     @AppStorage("outputMode") private var outputMode = "type"
     @AppStorage("inputDevice") private var inputDevice = ""
     @AppStorage("launchAtLogin") private var launchAtLogin = false
+    @AppStorage("autoStopEnabled") private var autoStopEnabled = true
+    @AppStorage("autoStopDelay") private var autoStopDelay: Double = 3.0
 
     @StateObject private var audioService = AudioService()
 
@@ -89,6 +91,22 @@ struct SettingsView: View {
                 Text("Turkish").tag("tr")
                 Text("Ukrainian").tag("uk")
                 Text("Swedish").tag("sv")
+            }
+
+            Divider()
+
+            Toggle("Auto-stop on silence", isOn: $autoStopEnabled)
+
+            if autoStopEnabled {
+                HStack {
+                    Text("Silence delay")
+                    Slider(value: $autoStopDelay, in: 1...10, step: 1) {
+                        Text("Silence delay")
+                    }
+                    Text("\(Int(autoStopDelay))s")
+                        .monospacedDigit()
+                        .frame(width: 30, alignment: .trailing)
+                }
             }
         }
         .padding()

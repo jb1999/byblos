@@ -157,6 +157,14 @@ struct OverlayContent: View {
                     }
                 }
             }
+
+            // Click-to-stop hint (only shown while recording, not processing)
+            if !state.isProcessing {
+                Text("click to stop")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.35))
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -167,6 +175,11 @@ struct OverlayContent: View {
                 .fill(.ultraThinMaterial)
                 .environment(\.colorScheme, .dark)
         )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // Post notification to toggle recording (stop).
+            NotificationCenter.default.post(name: Notification.Name("ByblosToggleRecording"), object: nil)
+        }
         .onAppear {
             elapsedSeconds = 0
             withAnimation(.linear(duration: 1).repeatForever(autoreverses: true)) {
