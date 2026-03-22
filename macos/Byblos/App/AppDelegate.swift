@@ -53,6 +53,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var unchangedPartialCount: Int = 0
     /// Whether speech has been detected (partial text appeared at least once).
     private var speechDetected: Bool = false
+    /// Last typed text for undo support.
+    private var lastTypedText: String = ""
+    /// Character count of last typed text for undo support.
+    private var lastTypedLength: Int = 0
 
     @AppStorage("autoStopEnabled") private var autoStopEnabled = true
     @AppStorage("autoStopDelay") private var autoStopDelay: Double = 3.0
@@ -180,6 +184,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordItem.isEnabled = engine != nil
         menu.addItem(recordItem)
 
+        let undoItem = NSMenuItem(title: "Undo Last (\u{2318}Z)", action: #selector(menuUndoLast), keyEquivalent: "")
+        undoItem.target = self
+        undoItem.isEnabled = lastTypedLength > 0
+        menu.addItem(undoItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // Status info: model name + recording state.
@@ -279,6 +288,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Log.info("Menu toggle recording clicked. isRecording=\(self.isRecording)")
         toggleRecording()
     }
+    @objc private func menuUndoLast() { undoLastTranscription() }
     @objc private func menuOpenSettings() { openSettings() }
     @objc private func menuShowTranscripts() { openTranscriptWindow() }
     @objc private func menuQuit() { NSApp.terminate(nil) }
@@ -536,8 +546,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
 
-                let finalText = processedText ?? rawText
+                // Apply vocabulary replacement after dictation post-processing.
+                let postProcessed = processedText ?? rawText
+                let finalText = VocabularyStore.shared.apply(to: postProcessed)
                 Log.info("Transcribed (\(String(format: "%.1f", elapsed))s): \(finalText)")
+
+                // Check for undo voice commands.
+                if self?.isUndoCommand(finalText) == true {
+                    self?.undoLastTranscription()
+                    NagManager.shared.recordTranscription()
+                    return
+                }
 
                 // Agent mode: route to AgentEngine instead of typing.
                 if dictationModeId == "agent" {
@@ -579,6 +598,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         try? await Task.sleep(nanoseconds: 3_000_000_000)
                         self?.hideOverlay()
                     }
+                    NagManager.shared.recordTranscription()
                     return
                 }
 
@@ -594,6 +614,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 TranscriptStore.shared.addEntry(entry)
 
                 accessibility.typeText(finalText, mode: outputMode)
+
+                // Track for undo support.
+                self?.lastTypedText = finalText
+                self?.lastTypedLength = finalText.count
+
+                // Record transcription for nag/shareware tracking.
+                NagManager.shared.recordTranscription()
 
                 // If LLM is available, re-process the text asynchronously.
                 if LlmService.shared.isReady && !dictationMode.systemPrompt.isEmpty {
@@ -660,6 +687,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupAccessibility() {
         accessibilityService = AccessibilityService()
+    }
+
+    // MARK: - Undo Last Transcription
+
+    func undoLastTranscription() {
+        guard lastTypedLength > 0 else {
+            Log.info("Undo: nothing to undo")
+            return
+        }
+        Log.info("Undo: deleting \(lastTypedLength) characters")
+
+        let source = CGEventSource(stateID: .hidSystemState)
+        for _ in 0..<lastTypedLength {
+            // Virtual key 0x33 = Delete (backspace).
+            if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x33, keyDown: true) {
+                keyDown.post(tap: .cgAnnotatedSessionEventTap)
+            }
+            if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x33, keyDown: false) {
+                keyUp.post(tap: .cgAnnotatedSessionEventTap)
+            }
+        }
+
+        Log.info("Undo: deleted '\(lastTypedText)'")
+        lastTypedText = ""
+        lastTypedLength = 0
+    }
+
+    /// Check if transcription text is an undo command.
+    private func isUndoCommand(_ text: String) -> Bool {
+        let lower = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return lower.hasPrefix("scratch that") || lower.hasPrefix("undo that") || lower.hasPrefix("delete that")
     }
 
     // MARK: - Settings

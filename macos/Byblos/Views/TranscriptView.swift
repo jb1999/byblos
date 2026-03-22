@@ -222,6 +222,9 @@ struct TranscriptView: View {
                     .help("Import an audio or video file for transcription")
                 }
                 ToolbarItem(placement: .automatic) {
+                    exportMenu
+                }
+                ToolbarItem(placement: .automatic) {
                     modeFilterPicker
                 }
             }
@@ -526,6 +529,110 @@ struct TranscriptView: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: - Export
+
+    private var exportMenu: some View {
+        Menu {
+            Button("Export as Markdown (.md)") {
+                exportTranscripts(format: .markdown)
+            }
+            Button("Export as Plain Text (.txt)") {
+                exportTranscripts(format: .plainText)
+            }
+            Button("Export as JSON (.json)") {
+                exportTranscripts(format: .json)
+            }
+        } label: {
+            Label("Export", systemImage: "square.and.arrow.up")
+        }
+        .disabled(store.entries.isEmpty)
+        .help("Export transcripts to a file")
+    }
+
+    private enum ExportFormat {
+        case markdown, plainText, json
+    }
+
+    private static let exportDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
+    private func exportTranscripts(format: ExportFormat) {
+        // Use selected entry if one is selected, otherwise export all filtered entries.
+        let entriesToExport: [TranscriptEntry]
+        if let selected = selectedEntry {
+            entriesToExport = [selected]
+        } else {
+            entriesToExport = filteredEntries.isEmpty ? store.entries : filteredEntries
+        }
+
+        guard !entriesToExport.isEmpty else { return }
+
+        let panel = NSSavePanel()
+        let defaultName: String
+        let contentType: UTType
+
+        switch format {
+        case .markdown:
+            defaultName = "transcripts.md"
+            contentType = UTType(filenameExtension: "md") ?? .plainText
+        case .plainText:
+            defaultName = "transcripts.txt"
+            contentType = .plainText
+        case .json:
+            defaultName = "transcripts.json"
+            contentType = .json
+        }
+
+        panel.allowedContentTypes = [contentType]
+        panel.nameFieldStringValue = defaultName
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let content: String
+        switch format {
+        case .markdown:
+            content = entriesToExport.map { entry in
+                var md = "## \(Self.exportDateFormatter.string(from: entry.date))\n\n"
+                md += entry.text + "\n\n"
+                md += "- **Mode:** \(DictationMode.mode(forId: entry.mode).name)\n"
+                md += "- **Duration:** \(String(format: "%.1f", entry.duration))s\n"
+                if let app = entry.appContext {
+                    md += "- **App:** \(app)\n"
+                }
+                md += "\n---\n"
+                return md
+            }.joined(separator: "\n")
+
+        case .plainText:
+            content = entriesToExport.map { entry in
+                "\(Self.exportDateFormatter.string(from: entry.date))\n\(entry.text)\n"
+            }.joined(separator: "\n---\n\n")
+
+        case .json:
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            if let data = try? encoder.encode(entriesToExport),
+               let jsonStr = String(data: data, encoding: .utf8) {
+                content = jsonStr
+            } else {
+                Log.error("Failed to encode transcripts to JSON")
+                return
+            }
+        }
+
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            Log.info("Exported \(entriesToExport.count) transcripts to \(url.lastPathComponent)")
+        } catch {
+            Log.error("Failed to export transcripts: \(error)")
         }
     }
 

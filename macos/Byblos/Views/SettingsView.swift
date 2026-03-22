@@ -1,5 +1,6 @@
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @AppStorage("selectedModel") private var selectedModel = "whisper-base"
@@ -28,6 +29,9 @@ struct SettingsView: View {
 
             audioTab
                 .tabItem { Label("Audio", systemImage: "mic") }
+
+            vocabularyTab
+                .tabItem { Label("Vocabulary", systemImage: "character.book.closed") }
 
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
@@ -147,6 +151,13 @@ struct SettingsView: View {
         .padding()
     }
 
+    // MARK: - Vocabulary
+
+    private var vocabularyTab: some View {
+        VocabularySettingsView()
+            .padding()
+    }
+
     // MARK: - About
 
     private var aboutTab: some View {
@@ -204,5 +215,110 @@ struct SettingsView: View {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         return "\(version) (\(build))"
+    }
+}
+
+// MARK: - Vocabulary Settings
+
+struct VocabularySettingsView: View {
+    @StateObject private var store = VocabularyStore.shared
+    @State private var newSource = ""
+    @State private var newReplacement = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Custom Vocabulary")
+                .font(.headline)
+
+            Text("Add word replacements that run after each transcription.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // Add new entry
+            HStack {
+                TextField("Source phrase", text: $newSource)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 160)
+
+                Image(systemName: "arrow.right")
+                    .foregroundStyle(.secondary)
+
+                TextField("Replacement", text: $newReplacement)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 160)
+
+                Button("Add") {
+                    store.addEntry(source: newSource, replacement: newReplacement)
+                    newSource = ""
+                    newReplacement = ""
+                }
+                .disabled(newSource.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            Divider()
+
+            // Entry list
+            if store.sortedEntries.isEmpty {
+                Text("No vocabulary entries yet.")
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+            } else {
+                List {
+                    ForEach(store.sortedEntries, id: \.source) { entry in
+                        HStack {
+                            Text(entry.source)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Image(systemName: "arrow.right")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                            Text(entry.replacement)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .fontWeight(.medium)
+                            Button {
+                                store.removeEntry(source: entry.source)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(minHeight: 100)
+            }
+
+            Divider()
+
+            // Import / Export
+            HStack {
+                Button("Import JSON...") {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [UTType.json]
+                    panel.canChooseFiles = true
+                    panel.canChooseDirectories = false
+                    if panel.runModal() == .OK, let url = panel.url,
+                       let data = try? Data(contentsOf: url) {
+                        store.importJSON(from: data)
+                    }
+                }
+
+                Button("Export JSON...") {
+                    guard let data = store.exportJSON() else { return }
+                    let panel = NSSavePanel()
+                    panel.allowedContentTypes = [UTType.json]
+                    panel.nameFieldStringValue = "vocabulary.json"
+                    if panel.runModal() == .OK, let url = panel.url {
+                        try? data.write(to: url)
+                    }
+                }
+
+                Spacer()
+
+                Text("\(store.entries.count) entries")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 }
