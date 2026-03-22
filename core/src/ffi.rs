@@ -371,6 +371,59 @@ pub extern "C" fn byblos_has_llm(handle: *const ByblosHandle) -> bool {
     handle.llm.is_some()
 }
 
+/// Enable or disable translation-to-English mode.
+///
+/// When enabled, whisper will translate any language to English.
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_set_translate(handle: *mut ByblosHandle, translate: bool) {
+    let handle = unsafe {
+        if handle.is_null() {
+            return;
+        }
+        &mut *handle
+    };
+    handle.pipeline.set_translate(translate);
+}
+
+/// Transcribe an audio file from disk.
+///
+/// The file must be a WAV file (16-bit or 32-bit float).
+/// For other formats, convert to WAV first (e.g. using afconvert on macOS).
+/// Returns the transcribed text as a C string. Caller must free with `byblos_free_string`.
+/// Returns null on failure.
+#[unsafe(no_mangle)]
+pub extern "C" fn byblos_transcribe_file(
+    handle: *mut ByblosHandle,
+    file_path: *const c_char,
+) -> *mut c_char {
+    let handle = unsafe {
+        if handle.is_null() {
+            return ptr::null_mut();
+        }
+        &mut *handle
+    };
+
+    let path_str = unsafe {
+        if file_path.is_null() {
+            return ptr::null_mut();
+        }
+        match CStr::from_ptr(file_path).to_str() {
+            Ok(s) => s,
+            Err(_) => return ptr::null_mut(),
+        }
+    };
+
+    match handle.pipeline.transcribe_file(std::path::Path::new(path_str)) {
+        Ok(text) => CString::new(text)
+            .map(|s| s.into_raw())
+            .unwrap_or(ptr::null_mut()),
+        Err(e) => {
+            log::error!("File transcription failed: {e}");
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Destroy a Byblos instance and free all resources.
 #[unsafe(no_mangle)]
 pub extern "C" fn byblos_destroy(handle: *mut ByblosHandle) {

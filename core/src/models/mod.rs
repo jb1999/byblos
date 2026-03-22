@@ -40,6 +40,9 @@ pub trait SpeechModel: Send {
     /// Transcribe 16kHz mono f32 audio samples.
     fn transcribe(&mut self, samples: &[f32]) -> anyhow::Result<TranscriptionResult>;
 
+    /// Enable or disable translation-to-English mode.
+    fn set_translate(&mut self, _translate: bool) {}
+
     /// Model display name.
     fn name(&self) -> &str;
 

@@ -56,6 +56,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @AppStorage("autoStopEnabled") private var autoStopEnabled = true
     @AppStorage("autoStopDelay") private var autoStopDelay: Double = 3.0
+    @AppStorage("appAwareMode") private var appAwareMode = true
+    /// Tracks the effective mode for the current recording session (may differ from user selection if app-aware).
+    private var effectiveModeId: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("Byblos starting up...")
@@ -286,6 +289,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Log.info("Dictation mode changed to: \(modeId)")
     }
 
+    /// Suggest a dictation mode based on the focused app's bundle ID.
+    private func suggestedModeForApp(_ bundleId: String) -> String? {
+        switch bundleId {
+        case "com.apple.mail", "com.google.Gmail":
+            return "email"
+        case "com.tinyspeck.slackmacgap", "com.discord.Discord", "com.apple.MobileSMS":
+            return "clean"
+        case "com.microsoft.VSCode", "com.apple.dt.Xcode":
+            return "codeComment"
+        case "com.apple.Notes", "md.obsidian":
+            return "notes"
+        default:
+            // Match Cursor editor variants (dev.cursor.*).
+            if bundleId.hasPrefix("dev.cursor.") {
+                return "codeComment"
+            }
+            return nil
+        }
+    }
+
     @objc private func menuToggleLaunchAtLogin() {
         let service = SMAppService.mainApp
         do {
@@ -323,6 +346,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         previousApp = NSWorkspace.shared.runningApplications.first(where: {
             $0.isActive && $0.bundleIdentifier != Bundle.main.bundleIdentifier
         }) ?? NSWorkspace.shared.frontmostApplication
+
+        // Determine effective dictation mode for this session.
+        let userModeId = UserDefaults.standard.string(forKey: "dictationMode") ?? "clean"
+        if appAwareMode, let bundleId = previousApp?.bundleIdentifier,
+           let suggested = suggestedModeForApp(bundleId) {
+            effectiveModeId = suggested
+            Log.info("App-aware mode: auto-selected '\(suggested)' for \(bundleId)")
+        } else {
+            effectiveModeId = userModeId
+        }
+
+        // Configure translate mode on the engine.
+        let isTranslate = effectiveModeId == "translate"
+        engine?.setTranslate(isTranslate)
 
         isRecording = true
         recordingStartTime = CFAbsoluteTimeGetCurrent()
@@ -453,8 +490,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ? .clipboard
             : .accessibilityFirst
 
-        // Get dictation mode for post-processing.
-        let dictationModeId = UserDefaults.standard.string(forKey: "dictationMode") ?? "clean"
+        // Get dictation mode for post-processing (use effective mode from app-aware selection).
+        let dictationModeId = effectiveModeId ?? (UserDefaults.standard.string(forKey: "dictationMode") ?? "clean")
         let dictationMode = DictationMode.mode(forId: dictationModeId)
         let language = UserDefaults.standard.string(forKey: "language") ?? "en"
         let appContext = targetApp?.localizedName

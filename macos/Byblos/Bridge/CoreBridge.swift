@@ -78,6 +78,29 @@ class ByblosEngine {
         return byblos_get_transcription_time_ms(handle)
     }
 
+    /// Enable or disable translation-to-English mode.
+    func setTranslate(_ enabled: Bool) {
+        guard let handle else { return }
+        byblos_set_translate(handle, enabled)
+        Log.info("[ByblosEngine] Translation mode: \(enabled ? "enabled" : "disabled")")
+    }
+
+    /// Transcribe an audio file from disk (must be WAV format).
+    /// For non-WAV files, convert to WAV first using afconvert.
+    func transcribeFile(path: String) -> String? {
+        guard let handle else { return nil }
+        guard let cStr = path.withCString({ pathPtr in
+            byblos_transcribe_file(handle, pathPtr)
+        }) else {
+            Log.error("[ByblosEngine] File transcription returned nil for: \(path)")
+            return nil
+        }
+        let result = String(cString: cStr)
+        byblos_free_string(cStr)
+        Log.info("[ByblosEngine] File transcribed: \(result.prefix(100))...")
+        return result
+    }
+
     // MARK: - Local LLM
 
     /// Initialize LLM early (must be called before ByblosEngine.init).

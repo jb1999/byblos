@@ -14,6 +14,7 @@ struct SettingsView: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @AppStorage("autoStopEnabled") private var autoStopEnabled = true
     @AppStorage("autoStopDelay") private var autoStopDelay: Double = 3.0
+    @AppStorage("appAwareMode") private var appAwareMode = true
 
     @StateObject private var audioService = AudioService()
 
@@ -51,6 +52,7 @@ struct SettingsView: View {
 
             Toggle("Voice commands", isOn: $voiceCommands)
             Toggle("Auto-capitalize", isOn: $autoCapitalize)
+            Toggle("Auto-select mode based on app", isOn: $appAwareMode)
 
             Toggle("Launch at Login", isOn: Binding(
                 get: {

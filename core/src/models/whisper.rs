@@ -10,6 +10,7 @@ pub struct WhisperModel {
     state: WhisperState,
     language: String,
     model_name: String,
+    translate: bool,
 }
 
 impl WhisperModel {
@@ -36,16 +37,22 @@ impl WhisperModel {
             state,
             language: language.to_string(),
             model_name,
+            translate: false,
         })
     }
 }
 
 impl SpeechModel for WhisperModel {
+    fn set_translate(&mut self, translate: bool) {
+        self.translate = translate;
+    }
+
     fn transcribe(&mut self, samples: &[f32]) -> Result<TranscriptionResult> {
         let start = std::time::Instant::now();
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_language(Some(&self.language));
+        params.set_translate(self.translate);
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);

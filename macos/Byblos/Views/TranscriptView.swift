@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Model
 
@@ -173,7 +174,14 @@ struct TranscriptView: View {
     @State private var searchText = ""
     @State private var modeFilter: String?
     @State private var selectedEntryId: UUID?
+    @State private var isTranscribingFile = false
+    @State private var isDropTargeted = false
     @AppStorage("dictationMode") private var dictationMode = "clean"
+
+    /// Supported audio/video file extensions for drag-and-drop import.
+    private static let supportedExtensions: Set<String> = [
+        "wav", "mp3", "m4a", "flac", "ogg", "mp4", "mov", "mkv",
+    ]
 
     var filteredEntries: [TranscriptEntry] {
         store.filteredEntries(search: searchText, modeFilter: modeFilter)
@@ -205,6 +213,15 @@ struct TranscriptView: View {
             .searchable(text: $searchText, prompt: "Search transcripts")
             .toolbar {
                 ToolbarItem(placement: .automatic) {
+                    Button {
+                        importAudioFile()
+                    } label: {
+                        Label("Import Audio File", systemImage: "doc.badge.plus")
+                    }
+                    .disabled(isTranscribingFile)
+                    .help("Import an audio or video file for transcription")
+                }
+                ToolbarItem(placement: .automatic) {
                     modeFilterPicker
                 }
             }
@@ -213,6 +230,167 @@ struct TranscriptView: View {
 
             // Bottom record bar
             recordBar
+        }
+        .overlay {
+            if isTranscribingFile {
+                ZStack {
+                    Color.black.opacity(0.3)
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Transcribing file...")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                    }
+                    .padding(24)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .ignoresSafeArea()
+            }
+            if isDropTargeted {
+                ZStack {
+                    Color.accentColor.opacity(0.15)
+                    VStack(spacing: 8) {
+                        Image(systemName: "arrow.down.doc")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.secondary)
+                        Text("Drop audio/video file to transcribe")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleFileDrop(providers)
+        }
+    }
+
+    // MARK: - File Import
+
+    private func importAudioFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [
+            .wav, .mp3, .mpeg4Audio,
+            .mpeg4Movie, .quickTimeMovie,
+            .audio,
+        ]
+        panel.message = "Select an audio or video file to transcribe"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        transcribeFileAt(url)
+    }
+
+    private func handleFileDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+            guard let data = item as? Data,
+                  let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+            let ext = url.pathExtension.lowercased()
+            guard Self.supportedExtensions.contains(ext) else {
+                DispatchQueue.main.async {
+                    Log.error("Unsupported file type: \(ext)")
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                self.transcribeFileAt(url)
+            }
+        }
+        return true
+    }
+
+    private func transcribeFileAt(_ url: URL) {
+        guard !isTranscribingFile else { return }
+        isTranscribingFile = true
+        let fileName = url.lastPathComponent
+        Log.info("Transcribing file: \(fileName)")
+
+        Task.detached {
+            let wavPath: String
+            let tempURL: URL?
+
+            // Convert non-WAV files to WAV using afconvert.
+            if url.pathExtension.lowercased() != "wav" {
+                let tmp = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString)
+                    .appendingPathExtension("wav")
+                tempURL = tmp
+
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
+                task.arguments = [url.path, tmp.path, "-d", "LEF32", "-f", "WAVE", "-r", "16000"]
+                do {
+                    try task.run()
+                    task.waitUntilExit()
+                    guard task.terminationStatus == 0 else {
+                        await MainActor.run {
+                            Log.error("afconvert failed with status \(task.terminationStatus) for: \(fileName)")
+                            self.isTranscribingFile = false
+                        }
+                        return
+                    }
+                } catch {
+                    await MainActor.run {
+                        Log.error("Failed to convert file: \(error)")
+                        self.isTranscribingFile = false
+                    }
+                    return
+                }
+                wavPath = tmp.path
+            } else {
+                wavPath = url.path
+                tempURL = nil
+            }
+
+            // Create a temporary engine for file transcription.
+            guard let modelPath = ByblosEngine.defaultModelPath() else {
+                await MainActor.run {
+                    Log.error("No model found for file transcription")
+                    self.isTranscribingFile = false
+                }
+                return
+            }
+            let language = UserDefaults.standard.string(forKey: "language") ?? "en"
+            guard let fileEngine = ByblosEngine(modelPath: modelPath, language: language) else {
+                await MainActor.run {
+                    Log.error("Failed to create engine for file transcription")
+                    self.isTranscribingFile = false
+                }
+                return
+            }
+
+            let result = fileEngine.transcribeFile(path: wavPath)
+
+            // Clean up temp file.
+            if let tmp = tempURL {
+                try? FileManager.default.removeItem(at: tmp)
+            }
+
+            await MainActor.run {
+                self.isTranscribingFile = false
+                guard let text = result, !text.isEmpty else {
+                    Log.info("File transcription returned empty result for: \(fileName)")
+                    return
+                }
+
+                let entry = TranscriptEntry(
+                    text: text,
+                    rawText: text,
+                    mode: "raw",
+                    duration: 0,
+                    language: language,
+                    appContext: "File: \(fileName)"
+                )
+                self.store.addEntry(entry)
+                self.selectedEntryId = entry.id
+                Log.info("File transcription complete: \(fileName) (\(text.count) chars)")
+            }
         }
     }
 

@@ -118,6 +118,23 @@ char *byblos_process_text(struct ByblosHandle *handle, const char *text, const c
 bool byblos_has_llm(const struct ByblosHandle *handle);
 
 /**
+ * Enable or disable translation-to-English mode.
+ *
+ * When enabled, whisper will translate any language to English.
+ */
+void byblos_set_translate(struct ByblosHandle *handle, bool translate);
+
+/**
+ * Transcribe an audio file from disk.
+ *
+ * The file must be a WAV file (16-bit or 32-bit float).
+ * For other formats, convert to WAV first (e.g. using afconvert on macOS).
+ * Returns the transcribed text as a C string. Caller must free with `byblos_free_string`.
+ * Returns null on failure.
+ */
+char *byblos_transcribe_file(struct ByblosHandle *handle, const char *file_path);
+
+/**
  * Destroy a Byblos instance and free all resources.
  */
 void byblos_destroy(struct ByblosHandle *handle);

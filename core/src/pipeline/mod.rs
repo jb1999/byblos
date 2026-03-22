@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::audio::capture::AudioCapture;
 use crate::audio::denoise::Denoiser;
@@ -55,6 +55,8 @@ pub struct Pipeline {
     streaming_stop: Arc<AtomicBool>,
     /// Handle to the streaming thread.
     streaming_thread: Option<std::thread::JoinHandle<()>>,
+    /// Whether to translate to English instead of transcribing.
+    translate: bool,
 }
 
 impl Pipeline {
@@ -89,6 +91,7 @@ impl Pipeline {
             last_transcription_ms: 0,
             streaming_stop: Arc::new(AtomicBool::new(false)),
             streaming_thread: None,
+            translate: false,
         })
     }
 
@@ -96,8 +99,74 @@ impl Pipeline {
     pub fn reload_model(&mut self, model_path: &Path, language: &str) -> Result<()> {
         let new_model = WhisperModel::load(model_path, language)?;
         self.model = Box::new(new_model);
+        // Re-apply translate setting to new model.
+        self.model.set_translate(self.translate);
         log::info!("Reloaded model from {:?} with language={}", model_path, language);
         Ok(())
+    }
+
+    /// Enable or disable translation-to-English mode.
+    pub fn set_translate(&mut self, translate: bool) {
+        self.translate = translate;
+        self.model.set_translate(translate);
+        log::info!("Translation mode: {}", if translate { "enabled" } else { "disabled" });
+    }
+
+    /// Transcribe an audio file from disk.
+    ///
+    /// Reads WAV files directly via `hound`. The caller is responsible for
+    /// converting non-WAV formats (e.g. using afconvert) before calling this.
+    pub fn transcribe_file(&mut self, path: &Path) -> Result<String> {
+        let reader = hound::WavReader::open(path)
+            .with_context(|| format!("Failed to open WAV file: {:?}", path))?;
+
+        let spec = reader.spec();
+        let raw_samples: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => {
+                reader.into_samples::<f32>()
+                    .collect::<std::result::Result<Vec<f32>, _>>()?
+            }
+            hound::SampleFormat::Int => {
+                let bits = spec.bits_per_sample;
+                let max_val = (1u32 << (bits - 1)) as f32;
+                reader.into_samples::<i32>()
+                    .collect::<std::result::Result<Vec<i32>, _>>()?
+                    .into_iter()
+                    .map(|s| s as f32 / max_val)
+                    .collect()
+            }
+        };
+
+        let raw_buffer = crate::audio::AudioBuffer {
+            samples: raw_samples,
+            sample_rate: spec.sample_rate,
+            channels: spec.channels,
+        };
+
+        let audio = resample::to_16khz_mono(&raw_buffer)?;
+        if audio.samples.is_empty() {
+            return Ok(String::new());
+        }
+
+        let result = self.model.transcribe(&audio.samples)?;
+        self.last_transcription_ms = result.duration_ms;
+        let mut output = result.text;
+
+        if self.config.post_process {
+            output = text::format::post_process(&output);
+        }
+        if self.config.voice_commands {
+            output = text::commands::process_commands(&output);
+        }
+
+        log::info!(
+            "Transcribed file {:?} ({:.1}s audio) in {}ms",
+            path,
+            audio.samples.len() as f32 / 16000.0,
+            result.duration_ms
+        );
+
+        Ok(output)
     }
 
     /// Get the duration of the last transcription in milliseconds.

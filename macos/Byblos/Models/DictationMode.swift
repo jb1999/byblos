@@ -150,6 +150,15 @@ extension DictationMode {
         }
     )
 
+    static let translate = DictationMode(
+        id: "translate",
+        name: "Translate",
+        icon: "globe",
+        description: "Transcribe any language, translate to English.",
+        systemPrompt: "",
+        postProcess: { $0 } // Translation is handled natively by whisper.
+    )
+
     static let agent = DictationMode(
         id: "agent",
         name: "Agent",
@@ -160,7 +169,7 @@ extension DictationMode {
     )
 
     /// All built-in modes in display order.
-    static let allModes: [DictationMode] = [.raw, .clean, .email, .notes, .codeComment, .agent]
+    static let allModes: [DictationMode] = [.raw, .clean, .email, .notes, .codeComment, .translate, .agent]
 
     /// Look up a mode by its id. Falls back to `.clean` if not found.
     static func mode(forId id: String) -> DictationMode {
