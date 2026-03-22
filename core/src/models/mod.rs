@@ -1,4 +1,5 @@
 pub mod manager;
+pub mod parakeet;
 pub mod whisper;
 
 /// Configuration for which model to use.

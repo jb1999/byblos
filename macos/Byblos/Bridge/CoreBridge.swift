@@ -160,25 +160,57 @@ class ByblosEngine {
         return nil
     }
 
-    /// Find the default model path.
+    /// Map model IDs to filenames.
+    static let modelFileNames: [String: String] = [
+        "whisper-tiny": "ggml-tiny.bin",
+        "whisper-base": "ggml-base.bin",
+        "whisper-small": "ggml-small.bin",
+        "whisper-medium": "ggml-medium.bin",
+        "whisper-large-v3": "ggml-large-v3.bin",
+        "whisper-turbo": "ggml-large-v3-turbo.bin",
+        "distil-whisper-large-v3": "ggml-distil-large-v3.bin",
+        // Parakeet models are directories, not single files.
+        // The path points to the directory containing model.onnx + tokenizer.json.
+        "parakeet-tdt-0.6b": "parakeet-tdt-0.6b",
+    ]
+
+    /// Find the model path for the user's selected model.
+    /// Falls back to any downloaded model if the selected one isn't available.
     static func defaultModelPath() -> String? {
         let modelsDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Byblos/models")
 
-        // Prefer base.en, fall back to tiny.en, then any .bin file.
-        let candidates = [
-            "ggml-base.en.bin",
-            "ggml-tiny.en.bin",
-        ]
-
-        for candidate in candidates {
-            let path = modelsDir.appendingPathComponent(candidate).path
+        // Try the user's selected model first.
+        let selectedId = UserDefaults.standard.string(forKey: "selectedModel") ?? "whisper-base"
+        if let fileName = modelFileNames[selectedId] {
+            let path = modelsDir.appendingPathComponent(fileName).path
             if FileManager.default.fileExists(atPath: path) {
                 return path
             }
         }
 
-        // Try any .bin file in the models dir.
+        // Fall back to any downloaded model (prefer larger/better ones).
+        let fallbackOrder = [
+            "ggml-large-v3-turbo.bin",
+            "ggml-distil-large-v3.bin",
+            "ggml-large-v3.bin",
+            "ggml-medium.bin",
+            "ggml-small.bin",
+            "ggml-base.bin",
+            "ggml-tiny.bin",
+            // Also check English-only variants (user may have downloaded these earlier).
+            "ggml-base.en.bin",
+            "ggml-tiny.en.bin",
+        ]
+
+        for fileName in fallbackOrder {
+            let path = modelsDir.appendingPathComponent(fileName).path
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+
+        // Last resort: any .bin file.
         if let files = try? FileManager.default.contentsOfDirectory(atPath: modelsDir.path) {
             if let bin = files.first(where: { $0.hasSuffix(".bin") }) {
                 return modelsDir.appendingPathComponent(bin).path

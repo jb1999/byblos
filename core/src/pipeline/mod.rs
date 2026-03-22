@@ -11,6 +11,7 @@ use crate::audio::denoise::Denoiser;
 use crate::audio::resample;
 use crate::audio::vad::VoiceActivityDetector;
 use crate::audio::AudioConfig;
+use crate::models::parakeet::ParakeetModel;
 use crate::models::whisper::WhisperModel;
 use crate::models::SpeechModel;
 use crate::text;
@@ -68,7 +69,17 @@ impl Pipeline {
         let audio_config = AudioConfig::default();
         let capture = AudioCapture::new(audio_config.device.as_deref())?;
 
-        let model = WhisperModel::load(model_path, language)?;
+        // Detect model backend from path.
+        // Detect model backend from path.
+        let model: Box<dyn SpeechModel> = if model_path.is_dir() {
+            // Directory with ONNX model — use Parakeet.
+            log::info!("Loading Parakeet model from {:?}", model_path);
+            Box::new(ParakeetModel::load(model_path)?)
+        } else {
+            // GGML .bin file — use Whisper.
+            log::info!("Loading Whisper model from {:?}", model_path);
+            Box::new(WhisperModel::load(model_path, language)?)
+        };
 
         let vad = if audio_config.vad {
             Some(VoiceActivityDetector::new(audio_config.vad_threshold)?)
@@ -84,7 +95,7 @@ impl Pipeline {
 
         Ok(Self {
             capture,
-            model: Box::new(model),
+            model,
             vad,
             denoiser,
             config: PipelineConfig::default(),

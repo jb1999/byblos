@@ -22,7 +22,10 @@ whisper-rs = { version = "0.13", features = ["metal"] }
 llama-cpp-2 = { version = "0.1.139", features = ["metal"] }
 encoding_rs = "0.8"
 
-# VAD / ONNX
+# NeMo speech models
+parakeet-rs = "0.3"
+
+# ONNX Runtime (used by parakeet-rs, also available for future models)
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 ndarray = "0.16"
 

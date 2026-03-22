@@ -81,6 +81,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        // Observe engine reload notifications (model switching).
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleReloadEngineNotification),
+            name: Notification.Name("ByblosReloadEngine"),
+            object: nil
+        )
+
         // Validate license on launch (once/day, non-blocking).
         Task { await LicenseService.shared.validateCached() }
 
@@ -92,6 +100,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleToggleRecordingNotification() {
         toggleRecording()
+    }
+
+    @objc private func handleReloadEngineNotification() {
+        guard !isRecording else {
+            Log.info("Cannot reload engine while recording")
+            return
+        }
+        Log.info("Reloading engine with new model selection...")
+        setupEngine()
     }
 
     func showOnboarding() {
