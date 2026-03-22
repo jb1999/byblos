@@ -1,7 +1,7 @@
 # Rust
 /target/
+/build/
 **/*.rs.bk
-Cargo.lock
 
 # macOS
 macos/Byblos.xcodeproj/
@@ -26,3 +26,4 @@ Thumbs.db
 *.swp
 *.swo
 *~
+testing-plan.md
