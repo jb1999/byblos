@@ -81,6 +81,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        // Validate license on launch (once/day, non-blocking).
+        Task { await LicenseService.shared.validateCached() }
+
         // Show onboarding on first launch.
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
             showOnboarding()

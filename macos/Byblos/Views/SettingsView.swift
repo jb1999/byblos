@@ -177,34 +177,36 @@ struct SettingsView: View {
             Text("Your voice never leaves your machine.")
                 .font(.callout)
 
-            Spacer()
+            Divider()
+
+            // License section.
+            LicenseSettingsSection()
+
+            Divider()
 
             VStack(spacing: 4) {
-                Text("Byblos is free to use.")
-                    .font(.callout)
-                Text("If you find it useful, please consider supporting development.")
+                Text("Byblos is shareware — free to use with no restrictions.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
-                Link("Support Byblos →", destination: URL(string: "https://byblos.im/support")!)
+                Link("Buy Annual License →", destination: URL(string: "https://byblos.im/support")!)
                     .font(.callout)
                     .padding(.top, 4)
             }
 
-            Divider()
+            Spacer()
 
             HStack(spacing: 16) {
                 Button("Re-run Setup") {
                     UserDefaults.standard.set(false, forKey: "hasCompletedOnboarding")
-                    // Access AppDelegate to show onboarding.
                     if let appDelegate = NSApp.delegate as? AppDelegate {
                         appDelegate.showOnboarding()
                     }
                 }
                 .controlSize(.small)
 
-                Link("GitHub", destination: URL(string: "https://github.com/nicholasgasior/byblos")!)
+                Link("GitHub", destination: URL(string: "https://github.com/jb1999/byblos")!)
                     .font(.callout)
             }
         }
@@ -318,6 +320,81 @@ struct VocabularySettingsView: View {
                 Text("\(store.entries.count) entries")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+            }
+        }
+    }
+}
+
+// MARK: - License Settings
+
+struct LicenseSettingsSection: View {
+    @ObservedObject private var license = LicenseService.shared
+    @State private var keyInput = ""
+    @State private var isActivating = false
+    @State private var statusMessage: String?
+    @State private var statusIsError = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if license.isLicensed {
+                HStack {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Licensed")
+                            .font(.callout.bold())
+                        if let days = license.daysRemaining {
+                            Text("\(days) days remaining")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let email = license.customerEmail {
+                            Text(email)
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    Spacer()
+                    Button("Deactivate") {
+                        Task { await license.deactivate() }
+                    }
+                    .controlSize(.small)
+                    .foregroundStyle(.red)
+                }
+            } else {
+                HStack {
+                    TextField("Paste license key", text: $keyInput)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 240)
+
+                    Button(isActivating ? "Activating..." : "Activate") {
+                        activateKey()
+                    }
+                    .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty || isActivating)
+                }
+
+                if let msg = statusMessage {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(statusIsError ? .red : .green)
+                }
+            }
+        }
+    }
+
+    private func activateKey() {
+        isActivating = true
+        statusMessage = nil
+        Task {
+            let success = await LicenseService.shared.activate(key: keyInput)
+            isActivating = false
+            if success {
+                statusMessage = "License activated!"
+                statusIsError = false
+                keyInput = ""
+            } else {
+                statusMessage = LicenseService.shared.lastError ?? "Activation failed."
+                statusIsError = true
             }
         }
     }

@@ -8,7 +8,6 @@ final class NagManager {
     static let shared = NagManager()
 
     private let totalTranscriptionsKey = "totalTranscriptions"
-    private let licenseKeyKey = "licenseKey"
     private let nagDismissedDateKey = "nagDismissedDate"
     private let nagThreshold = 50
     private let nagCooldownDays = 7
@@ -28,8 +27,8 @@ final class NagManager {
     }
 
     private func shouldShowNag(count: Int) -> Bool {
-        // Never nag if licensed (and not expired).
-        if isLicensed { return false }
+        // Never nag if licensed.
+        if LicenseService.shared.isLicensed { return false }
 
         // Only nag at multiples of the threshold.
         guard count > 0, count % nagThreshold == 0 else { return false }
@@ -45,48 +44,11 @@ final class NagManager {
         return true
     }
 
-    /// Validate license key format: BYBL-XXXX-XXXX-XXXX (4 groups of 4 alphanumeric chars).
-    func validateKeyFormat(_ key: String) -> Bool {
-        let pattern = "^BYBL-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$"
-        return key.range(of: pattern, options: .regularExpression) != nil
-    }
-
-    private let licenseActivationDateKey = "licenseActivationDate"
-    private let licenseDurationDays = 365
-
-    func storeLicenseKey(_ key: String) {
-        UserDefaults.standard.set(key, forKey: licenseKeyKey)
-        UserDefaults.standard.set(Date(), forKey: licenseActivationDateKey)
-        Log.info("License key stored (valid for 1 year)")
-    }
-
-    var isLicensed: Bool {
-        guard let key = UserDefaults.standard.string(forKey: licenseKeyKey),
-              validateKeyFormat(key) else { return false }
-        // Check if license has expired (1 year).
-        if let activationDate = UserDefaults.standard.object(forKey: licenseActivationDateKey) as? Date {
-            let daysSince = Calendar.current.dateComponents([.day], from: activationDate, to: Date()).day ?? 0
-            if daysSince > licenseDurationDays {
-                Log.info("License expired after \(daysSince) days")
-                return false
-            }
-        }
-        return true
-    }
-
-    var licenseDaysRemaining: Int? {
-        guard isLicensed,
-              let activationDate = UserDefaults.standard.object(forKey: licenseActivationDateKey) as? Date
-        else { return nil }
-        let daysSince = Calendar.current.dateComponents([.day], from: activationDate, to: Date()).day ?? 0
-        return max(0, licenseDurationDays - daysSince)
-    }
-
     private func showNag(count: Int) {
         guard nagPanel == nil else { return }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 280),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 320),
             styleMask: [.titled, .closable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -98,9 +60,6 @@ final class NagManager {
         panel.isReleasedWhenClosed = false
 
         let nagView = NagView(count: count) { [weak self] in
-            self?.dismissNag()
-        } onLicenseValidated: { [weak self] key in
-            self?.storeLicenseKey(key)
             self?.dismissNag()
         }
 
@@ -123,11 +82,11 @@ final class NagManager {
 struct NagView: View {
     let count: Int
     let onDismiss: @MainActor () -> Void
-    let onLicenseValidated: @MainActor (String) -> Void
 
     @State private var licenseKey = ""
+    @State private var isActivating = false
     @State private var showThankYou = false
-    @State private var showInvalidKey = false
+    @State private var errorMessage: String?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -139,42 +98,58 @@ struct NagView: View {
                 .font(.headline)
                 .multilineTextAlignment(.center)
 
-            Text("If you find it useful, consider supporting development.")
+            Text("If you find it useful, consider supporting development with an annual license.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Link("Support Byblos \u{2192}", destination: URL(string: "https://byblos.im/support")!)
+            Link("Buy Annual License \u{2192}", destination: URL(string: "https://byblos.im/support")!)
                 .font(.callout)
 
             Divider()
 
             if showThankYou {
-                Text("Thank you for supporting Byblos!")
-                    .font(.headline)
-                    .foregroundStyle(.green)
-            } else {
-                HStack {
-                    TextField("BYBL-XXXX-XXXX-XXXX", text: $licenseKey)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 220)
-
-                    Button("Verify") {
-                        if NagManager.shared.validateKeyFormat(licenseKey.trimmingCharacters(in: .whitespaces)) {
-                            showInvalidKey = false
-                            showThankYou = true
-                            onLicenseValidated(licenseKey.trimmingCharacters(in: .whitespaces))
-                        } else {
-                            showInvalidKey = true
-                        }
+                VStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.green)
+                    Text("Thank you for supporting Byblos!")
+                        .font(.headline)
+                        .foregroundStyle(.green)
+                    if let days = LicenseService.shared.daysRemaining {
+                        Text("License valid for \(days) days")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .disabled(licenseKey.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-
-                if showInvalidKey {
-                    Text("Invalid key format. Expected: BYBL-XXXX-XXXX-XXXX")
+                .onAppear {
+                    // Auto-dismiss after 2 seconds.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        onDismiss()
+                    }
+                }
+            } else {
+                VStack(spacing: 8) {
+                    Text("Already have a key?")
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        TextField("Paste your license key", text: $licenseKey)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 250)
+
+                        Button(isActivating ? "Verifying..." : "Activate") {
+                            activateKey()
+                        }
+                        .disabled(licenseKey.trimmingCharacters(in: .whitespaces).isEmpty || isActivating)
+                    }
+
+                    if let error = errorMessage {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
 
@@ -186,6 +161,23 @@ struct NagView: View {
             .font(.callout)
         }
         .padding(24)
-        .frame(width: 400)
+        .frame(width: 420)
+    }
+
+    private func activateKey() {
+        let key = licenseKey.trimmingCharacters(in: .whitespaces)
+        isActivating = true
+        errorMessage = nil
+
+        Task {
+            let success = await LicenseService.shared.activate(key: key)
+            isActivating = false
+
+            if success {
+                showThankYou = true
+            } else {
+                errorMessage = LicenseService.shared.lastError ?? "Activation failed. Check your key and try again."
+            }
+        }
     }
 }
