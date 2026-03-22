@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy Policy — Byblos</title>
+<style>
+:root{--bg:#0a0a0f;--fg:#e8e8ed;--dim:#888;--accent:#E8B84B}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);line-height:1.7}
+.container{max-width:680px;margin:0 auto;padding:40px 24px}
+h1{font-size:2rem;margin-bottom:8px}
+h2{font-size:1.3rem;margin-top:32px;margin-bottom:12px;color:var(--accent)}
+p,li{margin-bottom:12px;color:var(--dim)}
+ul{padding-left:24px}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.date{color:var(--dim);font-size:.9rem;margin-bottom:32px}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Privacy Policy</h1>
+<p class="date">Last updated: March 21, 2026</p>
+
+<h2>Summary</h2>
+<p>Byblos processes all voice and text locally on your device. We do not collect, store, or transmit your voice recordings, transcriptions, or any personal data.</p>
+
+<h2>What We Don't Collect</h2>
+<ul>
+<li><strong>Voice recordings</strong> — never leave your device</li>
+<li><strong>Transcriptions</strong> — stored only on your local machine</li>
+<li><strong>Usage analytics</strong> — none, zero telemetry</li>
+<li><strong>Personal information</strong> — we don't ask for accounts or sign-ups</li>
+<li><strong>Clipboard or screen content</strong> — processed locally, never transmitted</li>
+</ul>
+
+<h2>What We Do</h2>
+<ul>
+<li><strong>License validation</strong> — when you enter a license key, the app makes a single HTTPS request to LemonSqueezy's API (api.lemonsqueezy.com) to validate the key. This transmits only the license key and your computer's hostname. This is the only network request the app makes.</li>
+<li><strong>Model downloads</strong> — when you download speech models through the app, files are fetched from Hugging Face (huggingface.co). No personal data is sent.</li>
+</ul>
+
+<h2>Local Processing</h2>
+<p>All speech recognition (Whisper), text processing (LLM), and agent features run entirely on your machine using local models. No audio or text is sent to any cloud service for processing.</p>
+
+<h2>Third Parties</h2>
+<ul>
+<li><strong>LemonSqueezy</strong> (payments) — handles license key purchases as Merchant of Record. Their privacy policy applies to the purchase transaction: <a href="https://www.lemonsqueezy.com/privacy">lemonsqueezy.com/privacy</a></li>
+<li><strong>GitHub</strong> (distribution) — hosts the open-source code and website</li>
+<li><strong>Hugging Face</strong> (models) — hosts downloadable speech models</li>
+</ul>
+
+<h2>Data Storage</h2>
+<p>All app data is stored locally in <code>~/Library/Application Support/Byblos/</code>:</p>
+<ul>
+<li>Transcription history (transcripts.json)</li>
+<li>Custom vocabulary (vocabulary.json)</li>
+<li>Speech models (.bin files)</li>
+<li>LLM models (.gguf files)</li>
+<li>App preferences (macOS UserDefaults)</li>
+</ul>
+<p>You can delete all data at any time by removing this directory.</p>
+
+<h2>Open Source</h2>
+<p>Byblos is open source under the MIT license. You can audit the code to verify these claims: <a href="https://github.com/jb1999/byblos">github.com/jb1999/byblos</a></p>
+
+<h2>Contact</h2>
+<p>Questions about privacy? Open an issue on <a href="https://github.com/jb1999/byblos/issues">GitHub</a>.</p>
+
+<p style="margin-top:32px"><a href="/">← Back to Byblos</a></p>
+</div>
+</body>
+</html>
