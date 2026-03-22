@@ -9,9 +9,9 @@
 #
 # Setup notarization credentials (run once):
 #   xcrun notarytool store-credentials "ByblosNotary" \
-#     --apple-id "YOUR_APPLE_ID" \
+#     --apple-id "<your apple id email>" \
 #     --team-id "2JWVCUHX54" \
-#     --password "APP_SPECIFIC_PASSWORD"
+#     --password "<app-specific password from appleid.apple.com>"
 #
 # Usage: ./scripts/release.sh [version]
 #   Example: ./scripts/release.sh 0.1.0
