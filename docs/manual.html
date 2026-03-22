@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manual — Byblos</title>
+<style>
+:root{--bg:#0a0a0f;--fg:#e8e8ed;--dim:#888;--accent:#E8B84B;--card:#13131a;--border:#1e1e2a}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);line-height:1.7}
+.container{max-width:720px;margin:0 auto;padding:40px 24px 80px}
+h1{font-size:2rem;margin-bottom:8px}
+h2{font-size:1.4rem;margin-top:40px;margin-bottom:12px;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:8px}
+h3{font-size:1.1rem;margin-top:24px;margin-bottom:8px}
+p,li{margin-bottom:10px;color:var(--dim)}
+ul,ol{padding-left:24px;margin-bottom:16px}
+code{background:var(--card);padding:2px 6px;border-radius:4px;font-size:.9em}
+pre{background:var(--card);padding:16px;border-radius:8px;overflow-x:auto;margin-bottom:16px;border:1px solid var(--border)}
+pre code{background:none;padding:0}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+kbd{display:inline-block;background:var(--card);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:.85em;font-family:system-ui}
+.toc{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:20px 24px;margin:24px 0}
+.toc ul{list-style:none;padding-left:0}
+.toc li{margin-bottom:6px}
+.toc a{color:var(--fg)}
+.tip{background:#1a1a0f;border-left:3px solid var(--accent);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+.tip p{margin:0;color:var(--fg)}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Byblos User Manual</h1>
+<p>Version 0.1.0</p>
+
+<nav class="toc">
+<strong>Contents</strong>
+<ul>
+<li><a href="#getting-started">Getting Started</a></li>
+<li><a href="#recording">Recording &amp; Transcription</a></li>
+<li><a href="#modes">Dictation Modes</a></li>
+<li><a href="#transcripts">Transcript Workspace</a></li>
+<li><a href="#agent">Agent Mode</a></li>
+<li><a href="#file-transcription">File Transcription</a></li>
+<li><a href="#models">Managing Models</a></li>
+<li><a href="#vocabulary">Custom Vocabulary</a></li>
+<li><a href="#settings">Settings</a></li>
+<li><a href="#llm">Local LLM Setup</a></li>
+<li><a href="#license">License &amp; Support</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+<li><a href="#keyboard">Keyboard Reference</a></li>
+</ul>
+</nav>
+
+<h2 id="getting-started">Getting Started</h2>
+
+<h3>First Launch</h3>
+<p>When you first open Byblos, an onboarding wizard guides you through:</p>
+<ol>
+<li><strong>Microphone permission</strong> — Byblos needs mic access to hear you. Grant it when prompted.</li>
+<li><strong>Download a model</strong> — Pick a Whisper model. <strong>Whisper Base</strong> (142 MB) is recommended for most users.</li>
+<li><strong>You're ready</strong> — Byblos appears as a waveform icon in your menu bar.</li>
+</ol>
+
+<h3>Permissions</h3>
+<p>Byblos may request these macOS permissions:</p>
+<ul>
+<li><strong>Microphone</strong> — required for voice recording</li>
+<li><strong>Accessibility</strong> — required for typing text into other apps and for the hold-to-record hotkey. Grant in System Settings → Privacy &amp; Security → Accessibility.</li>
+</ul>
+
+<h2 id="recording">Recording &amp; Transcription</h2>
+
+<h3>Single-Click Recording</h3>
+<p><strong>Left-click</strong> the Byblos icon in the menu bar to start recording. Left-click again to stop. That's it.</p>
+<p>While recording:</p>
+<ul>
+<li>The menu bar icon turns red</li>
+<li>A floating overlay appears at the bottom of the screen showing streaming text</li>
+<li>Word count and elapsed time display in the overlay</li>
+</ul>
+
+<h3>Hold-to-Record Hotkey</h3>
+<p>Hold <kbd>Option</kbd> (or your configured key) to record, release to stop. This is the fastest way to use Byblos — no clicking needed.</p>
+<p>Configure the hotkey in Settings → General → "Hold key to record" (Option, Control, or Fn).</p>
+
+<div class="tip"><p><strong>Tip:</strong> The hotkey requires Accessibility permission. If it doesn't work, check System Settings → Privacy &amp; Security → Accessibility.</p></div>
+
+<h3>Auto-Stop on Silence</h3>
+<p>Byblos automatically stops recording when you stop speaking (after ~3 seconds of silence). This is enabled by default.</p>
+<p>Configure in Settings → General → "Auto-stop on silence" and adjust the silence delay (1–10 seconds).</p>
+
+<h3>Click the Overlay to Stop</h3>
+<p>You can also click the floating overlay itself to stop recording.</p>
+
+<h3>Output Modes</h3>
+<ul>
+<li><strong>Type into active app</strong> (default) — transcribed text is typed directly into whatever app you were using</li>
+<li><strong>Copy to clipboard</strong> — text is copied to your clipboard instead. Configure in Settings → General → "Output mode".</li>
+</ul>
+
+<h2 id="modes">Dictation Modes</h2>
+
+<p>Right-click the menu bar icon → Mode to switch. Byblos offers 7 modes:</p>
+
+<h3>Raw</h3>
+<p>Exact transcription with no processing. What you say is what you get.</p>
+
+<h3>Clean (default)</h3>
+<p>Removes filler words (um, uh, like, you know), fixes punctuation and capitalization. Best for general use.</p>
+
+<h3>Email</h3>
+<p>Professional tone with paragraph structure. Great for dictating emails — just speak naturally and it formats appropriately.</p>
+
+<h3>Notes</h3>
+<p>Converts your stream of consciousness into bullet points. Speak freely and get organized notes.</p>
+
+<h3>Code Comment</h3>
+<p>Concise, technical language prefixed with <code>//</code>. Strips filler and hedging language. Ideal when coding.</p>
+
+<h3>Translate</h3>
+<p>Speak in any language and get English text output. Uses Whisper's built-in translation capability. Supports 99+ languages.</p>
+
+<h3>Agent</h3>
+<p>AI assistant mode — speak commands instead of dictation. See <a href="#agent">Agent Mode</a> below.</p>
+
+<h3>App-Aware Mode Switching</h3>
+<p>When enabled (Settings → General → "Auto-select mode based on app"), Byblos automatically picks the right mode based on which app you're in:</p>
+<ul>
+<li>Mail, Gmail → Email mode</li>
+<li>Slack, Discord, Messages → Clean mode</li>
+<li>VS Code, Xcode, Cursor → Code Comment mode</li>
+<li>Notes, Obsidian → Notes mode</li>
+</ul>
+
+<h2 id="transcripts">Transcript Workspace</h2>
+
+<p>Right-click the menu bar icon → Show Transcripts to open the workspace.</p>
+
+<h3>Browsing</h3>
+<p>The sidebar lists all transcriptions grouped by date (Today, Yesterday, This Week, Earlier). Click an entry to view it in the detail panel.</p>
+
+<h3>Search</h3>
+<p>Use the search field to filter transcripts by content.</p>
+
+<h3>Recording from the Workspace</h3>
+<p>Click the large red record button at the bottom of the window. Partial text appears as you speak.</p>
+
+<h3>Editing</h3>
+<p>Click on transcript text in the detail panel to edit it directly.</p>
+
+<h3>Exporting</h3>
+<p>Toolbar → Export → choose Markdown, Plain Text, or JSON. Exports all transcripts or the selected one.</p>
+
+<h3>Undo</h3>
+<p>Say <strong>"scratch that"</strong>, <strong>"undo that"</strong>, or <strong>"delete that"</strong> to undo the last transcription. Also available in the right-click menu → Undo Last.</p>
+
+<h2 id="agent">Agent Mode</h2>
+
+<p>Agent mode turns Byblos into a voice-controlled AI assistant that can interact with your Mac. It requires a <a href="#llm">local LLM</a> to be installed.</p>
+
+<p>Switch to Agent mode via right-click → Mode → Agent (brain icon).</p>
+
+<h3>What You Can Say</h3>
+<ul>
+<li><strong>"What's on my screen?"</strong> — reads the content of your current window</li>
+<li><strong>"Find files called readme"</strong> — searches your computer via Spotlight</li>
+<li><strong>"Open Safari"</strong> — launches an application</li>
+<li><strong>"What's on my clipboard?"</strong> — reads clipboard content</li>
+<li><strong>"What time is it?"</strong> — answers using system context</li>
+</ul>
+
+<h3>How It Works</h3>
+<ol>
+<li>Your voice is transcribed by Whisper</li>
+<li>The local LLM understands your intent and generates actions</li>
+<li>Actions are executed (file search, screen reading, AppleScript, etc.)</li>
+<li>Results are summarized and displayed or typed</li>
+</ol>
+
+<p>All processing is local — nothing leaves your machine.</p>
+
+<h2 id="file-transcription">File Transcription</h2>
+
+<p>Byblos can transcribe audio and video files, not just live speech.</p>
+
+<h3>Drag and Drop</h3>
+<p>Drag an audio or video file onto the Transcript workspace. Supported formats: WAV, MP3, M4A, FLAC, OGG, MP4, MOV, MKV.</p>
+
+<h3>Import Button</h3>
+<p>In the Transcript workspace toolbar, click "Import Audio" to choose a file.</p>
+
+<p>Non-WAV files are automatically converted using macOS's built-in audio converter.</p>
+
+<h2 id="models">Managing Models</h2>
+
+<p>Open Settings → Models to manage speech recognition models.</p>
+
+<h3>Available Models</h3>
+<table style="width:100%;border-collapse:collapse;margin:16px 0">
+<tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:8px;color:var(--fg)">Model</th><th style="text-align:left;padding:8px;color:var(--fg)">Size</th><th style="text-align:left;padding:8px;color:var(--fg)">Best For</th></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Whisper Tiny</td><td style="padding:8px">75 MB</td><td style="padding:8px">Quick notes, low memory</td></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Whisper Base</td><td style="padding:8px">142 MB</td><td style="padding:8px">General use (recommended)</td></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Whisper Small</td><td style="padding:8px">466 MB</td><td style="padding:8px">Higher accuracy</td></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Whisper Turbo</td><td style="padding:8px">809 MB</td><td style="padding:8px">Fast + accurate on Apple Silicon</td></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Distil-Whisper</td><td style="padding:8px">756 MB</td><td style="padding:8px">Near-large quality, much faster</td></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Whisper Medium</td><td style="padding:8px">1.5 GB</td><td style="padding:8px">High accuracy</td></tr>
+<tr><td style="padding:8px">Whisper Large v3</td><td style="padding:8px">1.5 GB</td><td style="padding:8px">Best accuracy</td></tr>
+</table>
+
+<p>Click "Download" next to any model. Click "Remove" to free disk space.</p>
+
+<h2 id="vocabulary">Custom Vocabulary</h2>
+
+<p>Open Settings → Vocabulary to add custom word replacements.</p>
+
+<p>Useful for:</p>
+<ul>
+<li>Names that Whisper misspells ("jay bee" → "JB")</li>
+<li>Abbreviations ("API" → "API" instead of "a p i")</li>
+<li>Technical jargon specific to your work</li>
+</ul>
+
+<p>Replacements are case-insensitive and applied after transcription. You can import/export vocabulary as JSON.</p>
+
+<h2 id="settings">Settings</h2>
+
+<p>Right-click the menu bar icon → Settings.</p>
+
+<h3>General</h3>
+<ul>
+<li><strong>Hold key to record</strong> — Option, Control, or Fn</li>
+<li><strong>Output mode</strong> — Type into app or copy to clipboard</li>
+<li><strong>Voice commands</strong> — Enable/disable "scratch that" etc.</li>
+<li><strong>Auto-capitalize</strong> — Capitalize first letter of sentences</li>
+<li><strong>Auto-stop on silence</strong> — Enable + configure delay</li>
+<li><strong>Auto-select mode based on app</strong> — Context-aware mode switching</li>
+<li><strong>Launch at login</strong> — Start Byblos when you log in</li>
+<li><strong>Language</strong> — 18 languages supported</li>
+</ul>
+
+<h3>Models</h3>
+<p>Download, remove, and manage speech recognition models.</p>
+
+<h3>Audio</h3>
+<ul>
+<li><strong>Input device</strong> — Select your microphone</li>
+<li><strong>Noise suppression</strong> — Enable/disable</li>
+<li><strong>Voice activity detection</strong> — Enable/disable</li>
+</ul>
+
+<h3>Vocabulary</h3>
+<p>Manage custom word replacements. See <a href="#vocabulary">Custom Vocabulary</a>.</p>
+
+<h3>About</h3>
+<p>Version info, license status, re-run setup, GitHub link.</p>
+
+<h2 id="llm">Local LLM Setup (Optional)</h2>
+
+<p>A local LLM enables AI-powered features: smarter dictation cleanup, Agent mode, and future capabilities. It runs in a separate process alongside Whisper.</p>
+
+<h3>Installing a Model</h3>
+<ol>
+<li>Download a GGUF model. Recommended: <strong>Qwen2.5-7B-Instruct-Q4_K_M</strong> (~4.5 GB)</li>
+<li>Place it in <code>~/Library/Application Support/Byblos/llm-models/</code></li>
+<li>Restart Byblos — the LLM helper starts automatically</li>
+</ol>
+
+<div class="tip"><p><strong>Tip:</strong> You need at least 8 GB of unified memory for a 7B model. Apple Silicon Macs with 16 GB+ work best.</p></div>
+
+<h3>Supported Models</h3>
+<p>Any GGUF-format model works. Recommended options:</p>
+<ul>
+<li><strong>Qwen2.5-7B-Instruct</strong> — best for structured output and Agent mode</li>
+<li><strong>Phi-3.5-mini</strong> (3.8B) — lighter, good for basic cleanup</li>
+</ul>
+
+<h2 id="license">License &amp; Support</h2>
+
+<p>Byblos is shareware — completely free to use with no restrictions. An optional annual license removes a periodic reminder and supports development.</p>
+
+<p>To enter a license key: Settings → About → paste your key → Activate.</p>
+
+<p>For support, email <a href="mailto:support@byblos.im">support@byblos.im</a> or open an issue on <a href="https://github.com/jb1999/byblos/issues">GitHub</a>.</p>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h3>App won't record</h3>
+<ul>
+<li>Check microphone permission: System Settings → Privacy &amp; Security → Microphone</li>
+<li>Check that a model is downloaded: Settings → Models</li>
+</ul>
+
+<h3>Hotkey doesn't work</h3>
+<ul>
+<li>Grant Accessibility permission: System Settings → Privacy &amp; Security → Accessibility → add Byblos</li>
+<li>After rebuilding from source, you may need to re-grant permission</li>
+</ul>
+
+<h3>Transcription is empty</h3>
+<ul>
+<li>Speak closer to the microphone</li>
+<li>Check Settings → Audio → Input device is correct</li>
+<li>Try a larger model (Whisper Small or Medium) for better accuracy</li>
+</ul>
+
+<h3>Agent mode doesn't respond</h3>
+<ul>
+<li>Agent requires a local LLM. See <a href="#llm">Local LLM Setup</a>.</li>
+<li>Check the log file at <code>~/Library/Logs/Byblos.log</code> for errors</li>
+</ul>
+
+<h3>Log File</h3>
+<p>Byblos logs to <code>~/Library/Logs/Byblos.log</code>. Include this file when reporting bugs.</p>
+
+<h2 id="keyboard">Keyboard Reference</h2>
+
+<table style="width:100%;border-collapse:collapse;margin:16px 0">
+<tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:8px;color:var(--fg)">Action</th><th style="text-align:left;padding:8px;color:var(--fg)">How</th></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Start/stop recording</td><td style="padding:8px">Left-click menu bar icon</td></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Hold-to-record</td><td style="padding:8px">Hold <kbd>Option</kbd> (configurable)</td></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Open menu</td><td style="padding:8px">Right-click menu bar icon</td></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Stop from overlay</td><td style="padding:8px">Click the overlay</td></tr>
+<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px">Undo last transcription</td><td style="padding:8px">Say "scratch that"</td></tr>
+<tr><td style="padding:8px">Auto-stop</td><td style="padding:8px">Pause speaking for ~3 seconds</td></tr>
+</table>
+
+<p style="margin-top:40px"><a href="/">← Back to Byblos</a></p>
+
+</div>
+</body>
+</html>

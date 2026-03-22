@@ -190,7 +190,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
-                Link("Buy Annual License →", destination: URL(string: "https://byblos.im/support")!)
+                Link("Buy Annual License →", destination: URL(string: "https://byblos.im/#support")!)
                     .font(.callout)
                     .padding(.top, 4)
             }

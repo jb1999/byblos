@@ -103,7 +103,7 @@ struct NagView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Link("Buy Annual License \u{2192}", destination: URL(string: "https://byblos.im/support")!)
+            Link("Buy Annual License \u{2192}", destination: URL(string: "https://byblos.im/#support")!)
                 .font(.callout)
 
             Divider()

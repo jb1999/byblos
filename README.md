@@ -98,7 +98,7 @@ Place any GGUF model in `~/Library/Application Support/Byblos/llm-models/`. Reco
 
 ## Shareware
 
-Byblos is free to use with no restrictions. If you find it useful, please consider [supporting development](https://byblos.im/support).
+Byblos is free to use with no restrictions. If it becomes part of your workflow, consider getting an [annual license](https://byblos.im/#support) to support development.
 
 ## License
 
