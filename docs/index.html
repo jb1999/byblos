@@ -7,38 +7,52 @@
 <meta name="description" content="Local voice-to-text for macOS. Private. Fast. Free. Open source.">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#0a0a0f;--fg:#e8e8ed;--dim:#888;--gold:#E8B84B;--card:#13131a;--border:#1e1e2a}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.6;-webkit-font-smoothing:antialiased}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.6;-webkit-font-smoothing:antialiased}
 a{color:var(--gold);text-decoration:none}
 a:hover{text-decoration:underline}
 .container{max-width:960px;margin:0 auto;padding:0 24px}
+/* Nav */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:16px 24px;display:flex;align-items:center;gap:12px;background:rgba(10,10,15,0.85);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
+nav img{width:32px;height:32px;border-radius:6px}
+nav .brand{font-weight:700;font-size:1.1rem;color:var(--fg)}
+nav .links{margin-left:auto;display:flex;gap:20px;font-size:.9rem}
+nav .links a{color:var(--dim)}
+nav .links a:hover{color:var(--fg);text-decoration:none}
 /* Hero */
-.hero{text-align:center;padding:100px 24px 80px}
+.hero{text-align:center;padding:140px 24px 80px}
+.hero-icon{width:80px;height:80px;border-radius:18px;margin-bottom:24px;animation:float 3s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 .hero h1{font-size:3.5rem;letter-spacing:-.02em;margin-bottom:12px}
 .hero h1 span{color:var(--gold)}
 .hero p{font-size:1.25rem;color:var(--dim);margin-bottom:36px}
-.btn{display:inline-block;padding:12px 32px;border-radius:8px;font-weight:600;font-size:1rem;transition:opacity .2s}
+.btn{display:inline-block;padding:12px 32px;border-radius:8px;font-weight:600;font-size:1rem;transition:all .2s}
 .btn-primary{background:var(--gold);color:#0a0a0f}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 4px 20px rgba(232,184,75,0.3);text-decoration:none}
 .btn-secondary{border:1px solid var(--border);color:var(--fg);margin-left:12px}
-.btn:hover{opacity:.85;text-decoration:none}
+.btn-secondary:hover{border-color:var(--gold);text-decoration:none}
 /* Sections */
-section{padding:60px 0}
-section h2{font-size:1.75rem;text-align:center;margin-bottom:40px}
+section{padding:80px 0}
+section h2{font-size:1.75rem;text-align:center;margin-bottom:48px}
 /* Features grid */
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px;transition:transform .2s,border-color .2s}
+.card:hover{transform:translateY(-4px);border-color:var(--gold)}
 .card .icon{font-size:1.75rem;margin-bottom:12px}
 .card h3{font-size:1.1rem;margin-bottom:8px}
 .card p{color:var(--dim);font-size:.95rem}
 /* Steps */
 .steps{display:flex;justify-content:center;gap:48px;text-align:center;flex-wrap:wrap}
-.step .num{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;background:var(--gold);color:#0a0a0f;font-weight:700;font-size:1.1rem;margin-bottom:12px}
+.step .num{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;background:var(--gold);color:#0a0a0f;font-weight:700;font-size:1.1rem;margin-bottom:12px}
 .step p{color:var(--dim);font-size:.95rem;max-width:180px}
+.step-arrow{color:var(--dim);font-size:1.5rem;align-self:center;margin-top:-20px}
 /* Modes */
 .modes{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.mode{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px}
+.mode{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;transition:border-color .2s}
+.mode:hover{border-color:var(--gold)}
 .mode strong{display:block;margin-bottom:4px}
 .mode span{color:var(--dim);font-size:.9rem}
 /* Models */
@@ -49,28 +63,45 @@ section h2{font-size:1.75rem;text-align:center;margin-bottom:40px}
 .support p{color:var(--dim);margin-bottom:16px}
 /* Footer */
 footer{text-align:center;padding:48px 24px;color:var(--dim);font-size:.85rem;border-top:1px solid var(--border)}
+footer a{color:var(--dim)}
+footer a:hover{color:var(--gold)}
 /* Responsive */
 @media(max-width:680px){
   .hero h1{font-size:2.25rem}
+  .hero-icon{width:60px;height:60px}
   .grid3,.modes{grid-template-columns:1fr}
   .steps{flex-direction:column;align-items:center;gap:28px}
+  .step-arrow{display:none}
   .btn-secondary{margin-left:0;margin-top:12px}
+  nav .links{gap:12px}
 }
 </style>
 </head>
 <body>
 
+<nav>
+  <img src="favicon.png" alt="Byblos">
+  <span class="brand">Byblos</span>
+  <div class="links">
+    <a href="#features">Features</a>
+    <a href="#modes">Modes</a>
+    <a href="#support">Support</a>
+    <a href="manual.html">Manual</a>
+    <a href="https://github.com/jb1999/byblos">GitHub</a>
+  </div>
+</nav>
+
 <section class="hero">
   <div class="container">
+    <img src="apple-touch-icon.png" alt="Byblos" class="hero-icon">
     <h1><span>Byblos</span></h1>
     <p>Local voice-to-text. Private. Fast. Free.</p>
     <a href="https://github.com/jb1999/byblos/releases" class="btn btn-primary">Download for Mac</a>
     <a href="https://github.com/jb1999/byblos" class="btn btn-secondary">View on GitHub</a>
-    <a href="manual.html" class="btn btn-secondary">Manual</a>
   </div>
 </section>
 
-<section>
+<section id="features">
   <div class="container">
     <h2>Why Byblos</h2>
     <div class="grid3">
@@ -86,13 +117,15 @@ footer{text-align:center;padding:48px 24px;color:var(--dim);font-size:.85rem;bor
     <h2>How It Works</h2>
     <div class="steps">
       <div class="step"><div class="num">1</div><p>Click the menu bar icon</p></div>
+      <div class="step-arrow">&rarr;</div>
       <div class="step"><div class="num">2</div><p>Speak</p></div>
+      <div class="step-arrow">&rarr;</div>
       <div class="step"><div class="num">3</div><p>Text appears in your app</p></div>
     </div>
   </div>
 </section>
 
-<section>
+<section id="modes">
   <div class="container">
     <h2>Modes</h2>
     <div class="modes">
@@ -100,8 +133,8 @@ footer{text-align:center;padding:48px 24px;color:var(--dim);font-size:.85rem;bor
       <div class="mode"><strong>Email</strong><span>Formats dictation as a ready-to-send email</span></div>
       <div class="mode"><strong>Notes</strong><span>Bullet points and structured notes</span></div>
       <div class="mode"><strong>Code</strong><span>Dictate code with proper formatting</span></div>
-      <div class="mode"><strong>Translate</strong><span>Speak in one language, output in another</span></div>
-      <div class="mode"><strong>Agent</strong><span>Free-form LLM processing of your speech</span></div>
+      <div class="mode"><strong>Translate</strong><span>Speak any language, output in English</span></div>
+      <div class="mode"><strong>Agent</strong><span>AI assistant — search files, read screen, control apps</span></div>
     </div>
   </div>
 </section>
@@ -110,7 +143,7 @@ footer{text-align:center;padding:48px 24px;color:var(--dim);font-size:.85rem;bor
   <div class="container">
     <div class="models">
       <h2>Under the Hood</h2>
-      <p>Byblos uses <strong>Whisper</strong> for speech recognition and a local LLM via <strong>llama.cpp</strong> for text cleanup &mdash; all running on your machine with no network calls.</p>
+      <p>Byblos uses <strong>Whisper</strong> with CoreML for 3x faster speech recognition on Apple Silicon, and a local LLM via <strong>llama.cpp</strong> for intelligent text cleanup &mdash; all running on your machine with no network calls.</p>
     </div>
   </div>
 </section>
