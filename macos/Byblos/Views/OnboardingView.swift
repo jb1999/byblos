@@ -19,8 +19,9 @@ struct OnboardingView: View {
                 switch currentStep {
                 case 0: welcomeStep
                 case 1: microphoneStep
-                case 2: modelStep
-                case 3: readyStep
+                case 2: accessibilityStep
+                case 3: modelStep
+                case 4: readyStep
                 default: EmptyView()
                 }
             }
@@ -28,7 +29,7 @@ struct OnboardingView: View {
 
             // Step indicators
             HStack(spacing: 8) {
-                ForEach(0..<4, id: \.self) { index in
+                ForEach(0..<5, id: \.self) { index in
                     Circle()
                         .fill(index == currentStep ? Color.accentColor : Color.gray.opacity(0.3))
                         .frame(width: 8, height: 8)
@@ -119,7 +120,96 @@ struct OnboardingView: View {
         .onAppear { checkCurrentMicStatus() }
     }
 
-    // MARK: - Step 3: Download a Model
+    // MARK: - Step 3: Accessibility
+
+    @State private var accessibilityGranted = false
+
+    private var accessibilityStep: some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            Image(systemName: accessibilityGranted ? "checkmark.circle.fill" : "hand.raised.circle")
+                .font(.system(size: 48))
+                .foregroundStyle(accessibilityGranted ? .green : .accentColor)
+
+            Text("Accessibility Permission")
+                .font(.title2.bold())
+
+            Text("Byblos needs Accessibility permission to type transcriptions directly into your apps and to enable the hold-to-record hotkey.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+
+            if !accessibilityGranted {
+                Button("Open Accessibility Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                VStack(spacing: 4) {
+                    Text("Click +, find Byblos.app, add it, and enable the toggle.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Then click Check below.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 340)
+
+                Button("Check Permission") {
+                    accessibilityGranted = AXIsProcessTrusted()
+                }
+                .controlSize(.regular)
+
+                VStack(spacing: 2) {
+                    Text("Without Accessibility:")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                    Text("• Transcriptions are copied to clipboard (paste with ⌘V)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("• Hold-to-record hotkey will not work")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: 340)
+                .padding(.top, 4)
+            } else {
+                Label("Accessibility granted", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.callout)
+            }
+
+            Spacer()
+
+            HStack(spacing: 16) {
+                if !accessibilityGranted {
+                    Button("Skip (clipboard only)") {
+                        withAnimation { currentStep = 3 }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                }
+
+                Button("Continue") {
+                    withAnimation { currentStep = 3 }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!accessibilityGranted)
+            }
+            .padding(.bottom, 12)
+        }
+        .padding()
+        .onAppear {
+            accessibilityGranted = AXIsProcessTrusted()
+        }
+    }
+
+    // MARK: - Step 4: Download a Model
 
     private var modelStep: some View {
         VStack(spacing: 10) {
@@ -176,7 +266,7 @@ struct OnboardingView: View {
             Spacer()
 
             Button("Continue") {
-                withAnimation { currentStep = 3 }
+                withAnimation { currentStep = 4 }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -267,6 +357,8 @@ struct OnboardingView: View {
 
     // MARK: - Step 4: Ready
 
+    @State private var showInDock = true
+
     private var readyStep: some View {
         VStack(spacing: 16) {
             Spacer()
@@ -278,28 +370,56 @@ struct OnboardingView: View {
             Text("You're All Set!")
                 .font(.title.bold())
 
-            Text("Click the waveform icon in your menu bar to start recording, or hold the Option key.")
+            Text("Where should Byblos appear?")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
 
-            HStack(spacing: 12) {
-                Image(systemName: "waveform")
-                    .font(.title2)
-                    .foregroundStyle(Color.accentColor)
-                Text("Look for this icon in your menu bar")
-                    .font(.callout)
+            // Dock vs Menu Bar choice
+            VStack(spacing: 10) {
+                Button {
+                    showInDock = true
+                } label: {
+                    HStack {
+                        Image(systemName: showInDock ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(showInDock ? .green : .secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Dock").font(.callout.bold())
+                            Text("Always visible. Click to open. Recommended.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(showInDock ? Color.accentColor.opacity(0.08) : Color.clear))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(showInDock ? Color.accentColor.opacity(0.3) : Color.gray.opacity(0.2)))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    showInDock = false
+                } label: {
+                    HStack {
+                        Image(systemName: !showInDock ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(!showInDock ? .green : .secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Menu Bar Only").font(.callout.bold())
+                            Text("Hidden in the menu bar. May be hidden if menu bar is full.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(!showInDock ? Color.accentColor.opacity(0.08) : Color.clear))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(!showInDock ? Color.accentColor.opacity(0.3) : Color.gray.opacity(0.2)))
+                }
+                .buttonStyle(.plain)
             }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.accentColor.opacity(0.08))
-            )
+            .frame(maxWidth: 360)
 
             Spacer()
 
             Button("Start Using Byblos") {
+                UserDefaults.standard.set(showInDock, forKey: "showInDock")
                 onComplete()
             }
             .buttonStyle(.borderedProminent)

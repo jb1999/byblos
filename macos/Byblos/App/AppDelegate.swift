@@ -66,22 +66,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.info("Byblos starting up...")
-        setupEngine()
-        setupMenuBar()
-        setupHotkey()
-        setupAccessibility()
-        NSApp.setActivationPolicy(.accessory)
-        Log.info("Byblos ready. Engine loaded: \(self.engine != nil)")
 
-        // Observe toggle-recording notifications from TranscriptView / OverlayView.
+        // Observe notifications.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleToggleRecordingNotification),
             name: Notification.Name("ByblosToggleRecording"),
             object: nil
         )
-
-        // Observe engine reload notifications (model switching).
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleReloadEngineNotification),
@@ -89,13 +81,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        // Validate license on launch (once/day, non-blocking).
-        Task { await LicenseService.shared.validateCached() }
-
-        // Show onboarding on first launch.
+        // Show onboarding FIRST on fresh installs (before going accessory).
         if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
             showOnboarding()
+            // After onboarding completes, setupEngine is called from the completion handler.
+            setupMenuBar()
+            return
         }
+
+        // Normal launch.
+        setupEngine()
+        setupMenuBar()
+        setupHotkey()
+        setupAccessibility()
+        applyAppMode()
+        Log.info("Byblos ready. Engine loaded: \(self.engine != nil)")
+
+        // Validate license on launch (once/day, non-blocking).
+        Task { await LicenseService.shared.validateCached() }
     }
 
     @objc private func handleToggleRecordingNotification() {
@@ -126,9 +129,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Reload engine in case a model was downloaded during onboarding.
             self?.setupEngine()
+            self?.setupHotkey()
+            self?.setupAccessibility()
+            self?.applyAppMode()
+        }
+    }
 
-            // Revert to accessory mode unless other windows are open.
+    /// Apply dock or menu-bar-only mode based on user preference.
+    private func applyAppMode() {
+        let showInDock = UserDefaults.standard.bool(forKey: "showInDock")
+        if showInDock {
+            NSApp.setActivationPolicy(.regular)
+            Log.info("App mode: Dock")
+        } else {
             NSApp.setActivationPolicy(.accessory)
+            Log.info("App mode: Menu bar only")
         }
     }
 
