@@ -1,10 +1,12 @@
 import AppKit
 import ApplicationServices
 
-/// Types text into the frontmost application using macOS Accessibility API.
+/// Types text into the frontmost application using macOS APIs.
 ///
-/// This is how SuperWhisper, Wispr Flow, and macOS Dictation all work.
-/// Requires the user to grant Accessibility permission.
+/// Strategy order:
+/// 1. AXUIElement (cleanest, requires Accessibility)
+/// 2. Clipboard + Cmd+V via CGEvent (requires Accessibility for CGEvent)
+/// 3. Clipboard only (always works — user pastes manually)
 class AccessibilityService {
 
     /// Check if we have accessibility permission (never prompts).
@@ -13,27 +15,28 @@ class AccessibilityService {
     }
 
     /// Type text into the currently focused text field.
-    ///
-    /// Strategy:
-    /// 1. Try AXUIElement API to set value directly (cleanest).
-    /// 2. Fall back to CGEvent keyboard synthesis (works more broadly).
-    /// 3. Last resort: clipboard paste (works everywhere but clobbers clipboard).
     func typeText(_ text: String, mode: OutputMode = .accessibilityFirst) {
+        Log.info("[Accessibility] Typing \(text.count) chars, mode=\(mode), trusted=\(AXIsProcessTrusted())")
+
         switch mode {
         case .accessibilityFirst:
-            if !typeViaAccessibility(text) {
-                typeViaKeyboardEvents(text)
-            }
+            // Clipboard paste is the most universal method — works in Terminal,
+            // VS Code, Cursor, browsers, Electron apps, and native apps.
+            // AXUIElement only works with native Cocoa text fields.
+            pasteViaCGEvent(text)
         case .keyboardEvents:
-            typeViaKeyboardEvents(text)
+            if AXIsProcessTrusted() {
+                typeViaKeyboardEvents(text)
+            } else {
+                pasteViaCGEvent(text)
+            }
         case .clipboard:
-            pasteViaClipboard(text)
+            setClipboard(text)
         }
     }
 
-    // MARK: - Strategies
+    // MARK: - Strategy 1: AXUIElement
 
-    /// Insert text via AXUIElement (preferred — doesn't trigger keyboard shortcuts).
     private func typeViaAccessibility(_ text: String) -> Bool {
         let systemWide = AXUIElementCreateSystemWide()
 
@@ -48,7 +51,6 @@ class AccessibilityService {
             return false
         }
 
-        // Get current value and selection to insert at cursor.
         var currentValue: AnyObject?
         AXUIElementCopyAttributeValue(
             element as! AXUIElement,
@@ -56,7 +58,6 @@ class AccessibilityService {
             &currentValue
         )
 
-        // Try setting value with appended text.
         let newValue: String
         if let current = currentValue as? String {
             newValue = current + text
@@ -73,58 +74,68 @@ class AccessibilityService {
         return setResult == .success
     }
 
-    /// Synthesize keyboard events to type each character.
-    private func typeViaKeyboardEvents(_ text: String) {
-        let source = CGEventSource(stateID: .hidSystemState)
+    // MARK: - Strategy 2: Clipboard + CGEvent Cmd+V
 
+    private func pasteViaCGEvent(_ text: String) {
+        setClipboard(text)
+
+        // Small delay to ensure clipboard is set before paste event.
+        usleep(50_000) // 50ms
+
+        // Synthesize Cmd+V using CGEvent with nil source (more compatible).
+        let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true)
+        keyDown?.flags = .maskCommand
+        keyDown?.post(tap: .cghidEventTap)
+
+        let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false)
+        keyUp?.flags = .maskCommand
+        keyUp?.post(tap: .cghidEventTap)
+
+        Log.info("[Accessibility] Sent Cmd+V via CGEvent (text on clipboard)")
+    }
+
+    // MARK: - Strategy 3: Keyboard Events (character by character)
+
+    private func typeViaKeyboardEvents(_ text: String) {
         for char in text {
             let str = String(char)
             let utf16 = Array(str.utf16)
 
-            if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true) {
+            if let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) {
                 keyDown.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
-                keyDown.post(tap: .cgAnnotatedSessionEventTap)
+                keyDown.post(tap: .cghidEventTap)
             }
 
-            if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) {
+            if let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
                 keyUp.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
-                keyUp.post(tap: .cgAnnotatedSessionEventTap)
+                keyUp.post(tap: .cghidEventTap)
             }
+
+            // Small delay between keystrokes to prevent drops.
+            usleep(1_000) // 1ms
         }
     }
 
-    /// Paste via clipboard (last resort).
-    private func pasteViaClipboard(_ text: String) {
-        // Save current clipboard.
-        let pasteboard = NSPasteboard.general
-        let previousContents = pasteboard.string(forType: .string)
+    // MARK: - Clipboard
 
-        // Set text and paste.
+    private func setClipboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-
-        // Synthesize Cmd+V.
-        let source = CGEventSource(stateID: .hidSystemState)
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true) // 'v'
-        keyDown?.flags = .maskCommand
-        keyDown?.post(tap: .cgAnnotatedSessionEventTap)
-
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
-        keyUp?.flags = .maskCommand
-        keyUp?.post(tap: .cgAnnotatedSessionEventTap)
-
-        // Restore clipboard after a brief delay.
-        if let previous = previousContents {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                pasteboard.clearContents()
-                pasteboard.setString(previous, forType: .string)
-            }
-        }
+        Log.info("[Accessibility] Clipboard set (\(text.count) chars)")
     }
 
-    enum OutputMode {
+    enum OutputMode: CustomStringConvertible {
         case accessibilityFirst
         case keyboardEvents
         case clipboard
+
+        var description: String {
+            switch self {
+            case .accessibilityFirst: "accessibilityFirst"
+            case .keyboardEvents: "keyboardEvents"
+            case .clipboard: "clipboard"
+            }
+        }
     }
 }

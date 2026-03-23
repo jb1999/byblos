@@ -19,24 +19,46 @@ struct SettingsView: View {
 
     @StateObject private var audioService = AudioService()
 
-    var body: some View {
-        TabView {
-            generalTab
-                .tabItem { Label("General", systemImage: "gear") }
+    enum SettingsTab: String, CaseIterable {
+        case general = "General"
+        case models = "Models"
+        case audio = "Audio"
+        case vocabulary = "Vocabulary"
+        case about = "About"
 
-            modelsTab
-                .tabItem { Label("Models", systemImage: "cpu") }
-
-            audioTab
-                .tabItem { Label("Audio", systemImage: "mic") }
-
-            vocabularyTab
-                .tabItem { Label("Vocabulary", systemImage: "character.book.closed") }
-
-            aboutTab
-                .tabItem { Label("About", systemImage: "info.circle") }
+        var icon: String {
+            switch self {
+            case .general: "gear"
+            case .models: "cpu"
+            case .audio: "mic"
+            case .vocabulary: "character.book.closed"
+            case .about: "info.circle"
+            }
         }
-        .frame(width: 480, height: 400)
+    }
+
+    @State private var selectedTab: SettingsTab = .general
+
+    var body: some View {
+        NavigationSplitView {
+            List(SettingsTab.allCases, id: \.self, selection: $selectedTab) { tab in
+                Label(tab.rawValue, systemImage: tab.icon)
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 140, ideal: 160, max: 180)
+        } detail: {
+            Group {
+                switch selectedTab {
+                case .general: generalTab
+                case .models: modelsTab
+                case .audio: audioTab
+                case .vocabulary: vocabularyTab
+                case .about: aboutTab
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(width: 600, height: 440)
     }
 
     // MARK: - General

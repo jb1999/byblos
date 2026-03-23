@@ -122,27 +122,49 @@ struct OnboardingView: View {
     // MARK: - Step 3: Download a Model
 
     private var modelStep: some View {
-        VStack(spacing: 12) {
-            Text("Download a Model")
+        VStack(spacing: 10) {
+            Text("Download Models")
                 .font(.title2.bold())
-                .padding(.top, 20)
+                .padding(.top, 16)
 
-            Text("Byblos needs a speech model to transcribe your voice.")
+            Text("Pick a speech model (required) and optionally an AI model for smarter features.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
 
-            // Show only the three recommended models.
-            let onboardingModels = downloader.models.filter {
-                ["whisper-tiny", "whisper-base", "whisper-small"].contains($0.id)
+            let speechModels = downloader.models.filter { $0.category == .speech }
+            let llmModels = downloader.models.filter {
+                ["qwen3.5-4b", "qwen3-8b", "phi-3.5-mini"].contains($0.id)
             }
 
-            VStack(spacing: 8) {
-                ForEach(onboardingModels) { model in
-                    modelRow(model)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Speech (required)")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 20)
+
+                    ForEach(speechModels) { model in
+                        modelRow(model)
+                    }
+
+                    Divider()
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 20)
+
+                    Text("AI — optional, enables smart cleanup + Agent")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 20)
+
+                    ForEach(llmModels) { model in
+                        modelRow(model)
+                    }
                 }
+                .padding(.horizontal, 20)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 4)
+            .frame(maxHeight: 240)
 
             if let error = downloader.lastError {
                 Text(error)
@@ -159,14 +181,13 @@ struct OnboardingView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(!downloadComplete)
-            .padding(.bottom, 12)
+            .padding(.bottom, 10)
         }
         .padding()
         .onReceive(downloader.objectWillChange) { _ in
-            // Check if any model is now downloaded after downloader updates.
             DispatchQueue.main.async {
                 let hasAny = downloader.models.contains(where: {
-                    $0.isDownloaded && ["whisper-tiny", "whisper-base", "whisper-small"].contains($0.id)
+                    $0.isDownloaded && $0.category == .speech
                 })
                 if hasAny { downloadComplete = true }
             }
@@ -174,14 +195,15 @@ struct OnboardingView: View {
         .onAppear {
             downloader.refreshModelStates()
             let hasAny = downloader.models.contains(where: {
-                $0.isDownloaded && ["whisper-tiny", "whisper-base", "whisper-small"].contains($0.id)
+                $0.isDownloaded && $0.category == .speech
             })
             if hasAny { downloadComplete = true }
         }
     }
 
+
     private func modelRow(_ model: ModelEntry) -> some View {
-        let isRecommended = model.id == "whisper-base"
+        let isRecommended = model.id == "distil-whisper-large-v3"
         return HStack {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {

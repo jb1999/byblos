@@ -74,19 +74,33 @@ xcodebuild \
 # Copy app bundle to release directory.
 cp -R "$BUILD_DIR/DerivedData/Build/Products/Release/$APP_NAME.app" "$APP_PATH"
 
-# Step 4: Copy LLM helper into app bundle.
-echo "==> Bundling LLM helper..."
-HELPERS_DIR="$APP_PATH/Contents/MacOS"
-cp "$LLM_HELPER" "$HELPERS_DIR/byblos-llm"
+# Step 4: Bundle dylib and LLM helper into app.
+echo "==> Bundling libraries and helper..."
+FRAMEWORKS_DIR="$APP_PATH/Contents/Frameworks"
+mkdir -p "$FRAMEWORKS_DIR"
+cp "$PROJECT_DIR/target/release/libbyblos_core.dylib" "$FRAMEWORKS_DIR/"
+cp "$LLM_HELPER" "$APP_PATH/Contents/MacOS/byblos-llm"
+
+# Fix dylib load path (Rust outputs absolute path, we need @rpath).
+install_name_tool -id @rpath/libbyblos_core.dylib "$FRAMEWORKS_DIR/libbyblos_core.dylib"
+DYLIB_ORIG=$(otool -L "$APP_PATH/Contents/MacOS/Byblos" | grep libbyblos_core | awk '{print $1}')
+install_name_tool -change "$DYLIB_ORIG" @rpath/libbyblos_core.dylib "$APP_PATH/Contents/MacOS/Byblos"
+echo "    Fixed dylib path: $DYLIB_ORIG -> @rpath/libbyblos_core.dylib"
 
 # Step 5: Sign everything.
 echo "==> Signing..."
+
+# Sign the bundled dylib.
+codesign --force --options runtime \
+  --sign "$SIGNING_IDENTITY" \
+  --timestamp \
+  "$FRAMEWORKS_DIR/libbyblos_core.dylib"
 
 # Sign the LLM helper binary.
 codesign --force --options runtime \
   --sign "$SIGNING_IDENTITY" \
   --timestamp \
-  "$HELPERS_DIR/byblos-llm"
+  "$APP_PATH/Contents/MacOS/byblos-llm"
 
 # Sign the main app bundle (deep signs all nested code).
 codesign --force --deep --options runtime \

@@ -34,21 +34,42 @@ class LlmService: ObservableObject {
         return nil
     }
 
-    /// Find the best available LLM model.
+    /// Map LLM model IDs to filenames.
+    static let llmFileNames: [String: String] = [
+        "qwen3-8b": "qwen3-8b-q4_k_m.gguf",
+        "qwen2.5-7b": "qwen2.5-7b-instruct-q4_k_m.gguf",
+        "qwen3.5-4b": "qwen3.5-4b-q4_k_m.gguf",
+        "llama-3.2-3b": "llama-3.2-3b-instruct-q4_k_m.gguf",
+        "deepseek-r1-7b": "deepseek-r1-distill-qwen-7b-q4_k_m.gguf",
+        "eurollm-9b": "eurollm-9b-instruct-q4_k_m.gguf",
+        "mistral-7b": "mistral-7b-instruct-v0.3-q4_k_m.gguf",
+        "phi-3.5-mini": "phi-3.5-mini-instruct-q4_k_m.gguf",
+    ]
+
+    /// Find the LLM model path — prefers user selection, falls back to auto-detect.
     private var modelPath: String? {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Byblos/llm-models")
+
+        // Try user's selected LLM first.
+        let selectedId = UserDefaults.standard.string(forKey: "selectedLlm") ?? ""
+        if !selectedId.isEmpty, let fileName = Self.llmFileNames[selectedId] {
+            let path = dir.appendingPathComponent(fileName).path
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+
+        // Fall back: find any .gguf file, preferring better models.
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else {
             return nil
         }
-        // Prefer larger/better models first.
-        let preferred = ["qwen3-8b", "deepseek-r1", "eurollm", "mistral-7b", "qwen3.5-4b", "qwen2.5-7b", "llama-3.2-3b", "phi-3.5", "phi-4", "qwen", "tinyllama"]
+        let preferred = ["qwen3-8b", "deepseek-r1", "eurollm", "mistral-7b", "qwen3.5-4b", "qwen2.5-7b", "llama-3.2-3b", "phi-3.5"]
         for prefix in preferred {
             if let match = files.first(where: { $0.lowercased().contains(prefix) && $0.hasSuffix(".gguf") }) {
                 return dir.appendingPathComponent(match).path
             }
         }
-        // Any GGUF file.
         if let gguf = files.first(where: { $0.hasSuffix(".gguf") }) {
             return dir.appendingPathComponent(gguf).path
         }

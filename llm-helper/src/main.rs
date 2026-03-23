@@ -183,17 +183,17 @@ impl LlmEngine {
             return Ok(String::new());
         }
 
-        // Format as ChatML prompt (compatible with Qwen2.5, Phi-3, and most models).
+        // Format as ChatML prompt (compatible with Qwen2.5/3, Phi-3, and most models).
+        // Add /no_think to suppress chain-of-thought in Qwen 3 models.
         let prompt = if text.is_empty() {
-            // System-prompt-only mode (used for follow-up summarization).
             format!(
-                "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n\
+                "<|im_start|>system\nYou are a helpful assistant. /no_think<|im_end|>\n\
                  <|im_start|>user\n{system_prompt}<|im_end|>\n\
                  <|im_start|>assistant\n"
             )
         } else {
             format!(
-                "<|im_start|>system\n{system_prompt}<|im_end|>\n\
+                "<|im_start|>system\n{system_prompt} /no_think<|im_end|>\n\
                  <|im_start|>user\n{text}<|im_end|>\n\
                  <|im_start|>assistant\n"
             )
@@ -268,6 +268,44 @@ impl LlmEngine {
             ctx.decode(&mut batch).context("Decode")?;
         }
 
+        // Clean up model-specific output artifacts.
+        let output = clean_output(&output);
+
         Ok(output.trim().to_string())
     }
+}
+
+/// Strip model-specific tags and artifacts from LLM output.
+fn clean_output(text: &str) -> String {
+    let mut output = text.to_string();
+
+    // Strip <think>...</think> tags (Qwen 3, Qwen 3.5, DeepSeek R1).
+    if let Some(think_end) = output.find("</think>") {
+        output = output[think_end + "</think>".len()..].to_string();
+    } else if output.starts_with("<think>") {
+        // Think tag opened but never closed — model used all tokens thinking.
+        // Return empty so the caller falls back to regex processing.
+        return String::new();
+    }
+
+    // Strip common stop/control tokens that might leak through.
+    let tokens_to_strip = [
+        "<|im_end|>",
+        "<|im_start|>",
+        "<|endoftext|>",
+        "<|end|>",
+        "<|eot_id|>",
+        "<|begin_of_text|>",
+        "<|start_header_id|>",
+        "<|end_header_id|>",
+        "</s>",
+        "[/INST]",
+        "[INST]",
+        "assistant\n",
+    ];
+    for token in tokens_to_strip {
+        output = output.replace(token, "");
+    }
+
+    output
 }

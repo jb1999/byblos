@@ -4,6 +4,7 @@ import SwiftUI
 struct ModelManagerView: View {
     @StateObject private var downloader = ModelDownloader()
     @AppStorage("selectedModel") private var selectedModel = "whisper-base"
+    @AppStorage("selectedLlm") private var selectedLlm = ""
 
     private var speechModels: [ModelEntry] {
         downloader.models.filter { $0.category == .speech }
@@ -74,30 +75,47 @@ struct ModelManagerView: View {
             Spacer()
 
             if model.isDownloaded {
-                // "Use" button only for speech models.
-                if model.category == .speech && model.id != selectedModel {
-                    Button("Use") {
+                let isActive = model.category == .speech
+                    ? model.id == selectedModel
+                    : model.id == selectedLlm
+
+                // Select / Active indicator
+                Button {
+                    if model.category == .speech {
                         selectedModel = model.id
-                        Log.info("Switched to model: \(model.id)")
+                        Log.info("Switched speech model to: \(model.id)")
+                        NotificationCenter.default.post(
+                            name: Notification.Name("ByblosReloadEngine"),
+                            object: nil
+                        )
+                    } else {
+                        selectedLlm = model.id
+                        Log.info("Switched LLM to: \(model.id)")
+                        // LLM helper will pick this up on next restart.
                         NotificationCenter.default.post(
                             name: Notification.Name("ByblosReloadEngine"),
                             object: nil
                         )
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                } else if model.category == .speech {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                } else {
-                    // LLM: just show checkmark (auto-detected).
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(isActive ? .green : .secondary)
+                        Text(isActive ? "Active" : "Activate")
+                            .font(.caption)
+                            .foregroundStyle(isActive ? .green : .accentColor)
+                    }
                 }
+                .buttonStyle(.plain)
+                .disabled(isActive)
+
                 Button("Remove") {
                     downloader.removeModel(id: model.id)
-                    if model.id == selectedModel {
+                    if model.category == .speech && model.id == selectedModel {
                         selectedModel = "whisper-base"
+                    }
+                    if model.category == .llm && model.id == selectedLlm {
+                        selectedLlm = ""
                     }
                 }
                 .buttonStyle(.plain)
@@ -198,6 +216,22 @@ final class ModelDownloader: NSObject, ObservableObject {
                 models[i].diskSizeLabel = nil
             }
         }
+
+        // Auto-select a speech model if none is selected or selected one isn't downloaded.
+        let selectedSpeech = UserDefaults.standard.string(forKey: "selectedModel") ?? ""
+        let speechDownloaded = models.filter { $0.category == .speech && $0.isDownloaded }
+        if !speechDownloaded.contains(where: { $0.id == selectedSpeech }),
+           let first = speechDownloaded.first {
+            UserDefaults.standard.set(first.id, forKey: "selectedModel")
+        }
+
+        // Auto-select an LLM if none is selected but one is downloaded.
+        let selectedLlm = UserDefaults.standard.string(forKey: "selectedLlm") ?? ""
+        let llmDownloaded = models.filter { $0.category == .llm && $0.isDownloaded }
+        if !llmDownloaded.contains(where: { $0.id == selectedLlm }),
+           let first = llmDownloaded.first {
+            UserDefaults.standard.set(first.id, forKey: "selectedLlm")
+        }
     }
 
     func downloadModel(id: String) {
@@ -274,17 +308,23 @@ final class ModelDownloader: NSObject, ObservableObject {
                 return
             }
 
-            let dest = Self.modelsDirectory(for: model.category).appendingPathComponent(model.fileName)
+            let destDir = Self.modelsDirectory(for: model.category)
+            let dest = destDir.appendingPathComponent(model.fileName)
             do {
+                // Ensure directory exists.
+                try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
                 // Remove existing file if any.
                 if FileManager.default.fileExists(atPath: dest.path) {
                     try FileManager.default.removeItem(at: dest)
                 }
-                try FileManager.default.moveItem(at: location, to: dest)
+                // Copy instead of move — moveItem fails across volumes
+                // (URLSession temp files are in /private/var/folders/).
+                try FileManager.default.copyItem(at: location, to: dest)
+                try? FileManager.default.removeItem(at: location)
                 Log.info("Downloaded model to: \(dest.path)")
             } catch {
                 self.lastError = "Failed to save model: \(error.localizedDescription)"
-                Log.error("Failed to move downloaded model: \(error)")
+                Log.error("Failed to save downloaded model to \(dest.path): \(error)")
             }
 
             self.cleanupDownload(id: modelId)
@@ -338,7 +378,16 @@ final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked S
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        downloader.handleDownloadCompleted(modelId: modelId, location: location, error: nil)
+        // The temp file at `location` is deleted when this method returns.
+        // Copy it to a stable temp location synchronously before dispatching.
+        let stableTmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("byblos-download-\(modelId)-\(UUID().uuidString).tmp")
+        do {
+            try FileManager.default.copyItem(at: location, to: stableTmp)
+            downloader.handleDownloadCompleted(modelId: modelId, location: stableTmp, error: nil)
+        } catch {
+            downloader.handleDownloadCompleted(modelId: modelId, location: nil, error: error)
+        }
     }
 
     func urlSession(
@@ -389,7 +438,7 @@ struct ModelEntry: Identifiable {
             id: "whisper-tiny",
             displayName: "Whisper Tiny",
             description: "Fastest, lower accuracy. Good for quick notes.",
-            sizeLabel: "75 MB",
+            sizeLabel: "74 MB",
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
             category: .speech, fileName: "ggml-tiny.bin",
@@ -399,7 +448,7 @@ struct ModelEntry: Identifiable {
             id: "whisper-base",
             displayName: "Whisper Base",
             description: "Good balance of speed and accuracy.",
-            sizeLabel: "142 MB",
+            sizeLabel: "141 MB",
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
             category: .speech, fileName: "ggml-base.bin",
@@ -409,7 +458,7 @@ struct ModelEntry: Identifiable {
             id: "whisper-small",
             displayName: "Whisper Small",
             description: "Higher accuracy, moderate speed.",
-            sizeLabel: "466 MB",
+            sizeLabel: "465 MB",
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
             category: .speech, fileName: "ggml-small.bin",
@@ -428,8 +477,8 @@ struct ModelEntry: Identifiable {
         ModelEntry(
             id: "whisper-large-v3",
             displayName: "Whisper Large v3",
-            description: "Best accuracy, needs 3GB+ RAM.",
-            sizeLabel: "1.5 GB",
+            description: "Best accuracy. Needs 4GB+ RAM.",
+            sizeLabel: "2.9 GB",
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
             category: .speech, fileName: "ggml-large-v3.bin",
@@ -437,9 +486,9 @@ struct ModelEntry: Identifiable {
         ),
         ModelEntry(
             id: "whisper-turbo",
-            displayName: "Whisper Turbo",
-            description: "Fast and accurate. Best for Apple Silicon.",
-            sizeLabel: "809 MB",
+            displayName: "Whisper Large v3 Turbo",
+            description: "Near-best accuracy at 6x the speed of Large v3.",
+            sizeLabel: "1.5 GB",
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
             category: .speech, fileName: "ggml-large-v3-turbo.bin",
@@ -449,7 +498,7 @@ struct ModelEntry: Identifiable {
             id: "distil-whisper-large-v3",
             displayName: "Distil-Whisper Large v3",
             description: "6x faster than large, near-large quality.",
-            sizeLabel: "756 MB",
+            sizeLabel: "1.4 GB",
             downloadURL:
                 "https://huggingface.co/distil-whisper/distil-large-v3-ggml/resolve/main/ggml-distil-large-v3.bin",
             category: .speech, fileName: "ggml-distil-large-v3.bin",
@@ -460,7 +509,7 @@ struct ModelEntry: Identifiable {
             id: "qwen3-8b",
             displayName: "Qwen 3 8B",
             description: "Best quality. Great for Agent mode. Needs 16GB+ RAM.",
-            sizeLabel: "5.0 GB",
+            sizeLabel: "4.3 GB",
             downloadURL:
                 "https://huggingface.co/bartowski/Qwen_Qwen3-8B-GGUF/resolve/main/Qwen_Qwen3-8B-Q4_K_M.gguf",
             category: .llm, fileName: "qwen3-8b-q4_k_m.gguf",
@@ -470,7 +519,7 @@ struct ModelEntry: Identifiable {
             id: "qwen2.5-7b",
             displayName: "Qwen 2.5 7B Instruct",
             description: "Excellent structured output. Needs 16GB+ RAM.",
-            sizeLabel: "4.5 GB",
+            sizeLabel: "4.3 GB",
             downloadURL:
                 "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
             category: .llm, fileName: "qwen2.5-7b-instruct-q4_k_m.gguf",
@@ -480,7 +529,7 @@ struct ModelEntry: Identifiable {
             id: "qwen3.5-4b",
             displayName: "Qwen 3.5 4B",
             description: "Newest, great quality for size. Works on 8GB+ RAM.",
-            sizeLabel: "2.8 GB",
+            sizeLabel: "2.7 GB",
             downloadURL:
                 "https://huggingface.co/bartowski/Qwen_Qwen3.5-4B-GGUF/resolve/main/Qwen_Qwen3.5-4B-Q4_K_M.gguf",
             category: .llm, fileName: "qwen3.5-4b-q4_k_m.gguf",
@@ -490,7 +539,7 @@ struct ModelEntry: Identifiable {
             id: "llama-3.2-3b",
             displayName: "Llama 3.2 3B Instruct",
             description: "Fast and lightweight. Good for 8GB machines.",
-            sizeLabel: "2.0 GB",
+            sizeLabel: "1.9 GB",
             downloadURL:
                 "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
             category: .llm, fileName: "llama-3.2-3b-instruct-q4_k_m.gguf",
@@ -500,7 +549,7 @@ struct ModelEntry: Identifiable {
             id: "deepseek-r1-7b",
             displayName: "DeepSeek R1 Distill 7B",
             description: "Reasoning model. Best for complex Agent tasks. 16GB+ RAM.",
-            sizeLabel: "4.7 GB",
+            sizeLabel: "4.3 GB",
             downloadURL:
                 "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
             category: .llm, fileName: "deepseek-r1-distill-qwen-7b-q4_k_m.gguf",
@@ -510,7 +559,7 @@ struct ModelEntry: Identifiable {
             id: "eurollm-9b",
             displayName: "EuroLLM 9B Instruct",
             description: "All 24 EU languages. Best for European users. 16GB+ RAM.",
-            sizeLabel: "5.5 GB",
+            sizeLabel: "5.1 GB",
             downloadURL:
                 "https://huggingface.co/bartowski/EuroLLM-9B-Instruct-GGUF/resolve/main/EuroLLM-9B-Instruct-Q4_K_M.gguf",
             category: .llm, fileName: "eurollm-9b-instruct-q4_k_m.gguf",
@@ -520,7 +569,7 @@ struct ModelEntry: Identifiable {
             id: "mistral-7b",
             displayName: "Mistral 7B Instruct",
             description: "Strong French/German/Spanish/Italian. 16GB+ RAM.",
-            sizeLabel: "4.4 GB",
+            sizeLabel: "4.0 GB",
             downloadURL:
                 "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
             category: .llm, fileName: "mistral-7b-instruct-v0.3-q4_k_m.gguf",

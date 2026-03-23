@@ -27,3 +27,8 @@ Thumbs.db
 *.swo
 *~
 testing-plan.md
+
+# IDE / tool files
+.specstory/
+.cursorindexingignore
+.claude/

@@ -189,8 +189,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "whisper-base": "Whisper Base",
             "whisper-small": "Whisper Small",
             "whisper-medium": "Whisper Medium",
-            "distil-whisper": "Distil-Whisper",
-            "moonshine-tiny": "Moonshine Tiny",
+            "whisper-large-v3": "Whisper Large v3",
+            "whisper-turbo": "Whisper Large v3 Turbo",
+            "distil-whisper-large-v3": "Distil-Whisper Large v3",
         ]
         return names[selectedModel] ?? selectedModel
     }
@@ -507,12 +508,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             accessibilityDescription: "Byblos (Transcribing)"
         )
 
-        // Re-activate the previous app so typed text goes there.
         let targetApp = previousApp
-        if let app = targetApp {
-            Log.info("Re-activating: \(app.localizedName ?? "unknown")")
-            app.activate()
-        }
 
         // Determine the output mode from settings.
         let outputModeSetting = UserDefaults.standard.string(forKey: "outputMode") ?? "type"
@@ -633,6 +629,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 TranscriptStore.shared.addEntry(entry)
 
+                // Re-activate the target app RIGHT before typing.
+                if let app = targetApp {
+                    Log.info("Re-activating: \(app.localizedName ?? "unknown")")
+                    app.activate()
+                    // Give the app a moment to come to foreground.
+                    usleep(200_000) // 200ms
+                }
+
                 accessibility.typeText(finalText, mode: outputMode)
 
                 // Track for undo support.
@@ -752,41 +756,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Menu-bar-only apps (.accessory) cannot present windows that take focus.
-        // Temporarily become a regular app so the settings window appears properly.
+        // Create our own settings window — avoids the system menu bar.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 440),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Byblos Settings"
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: SettingsView())
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(settingsWindowWillClose(_:)),
+            name: NSWindow.willCloseNotification,
+            object: window
+        )
+
+        settingsWindow = window
+
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-
-        // macOS 14+ uses showSettingsWindow:, macOS 13 uses showPreferencesWindow:.
-        if #available(macOS 14, *) {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        } else {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
-
-        // Track the settings window so we can observe when it closes.
-        // The Settings scene window typically appears after a brief run-loop cycle.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            // Find the settings window (it will be the key window after the action).
-            let window = NSApp.windows.first(where: {
-                $0.isVisible && $0 !== self.overlayWindow
-            })
-            self.settingsWindow = window
-
-            if let window {
-                Log.info("Settings window opened")
-                NotificationCenter.default.addObserver(
-                    self,
-                    selector: #selector(self.settingsWindowWillClose(_:)),
-                    name: NSWindow.willCloseNotification,
-                    object: window
-                )
-            } else {
-                Log.error("Settings window not found — reverting to accessory mode")
-                NSApp.setActivationPolicy(.accessory)
-            }
-        }
+        window.makeKeyAndOrderFront(nil)
+        Log.info("Settings window opened")
     }
 
     @objc private func settingsWindowWillClose(_ notification: Notification) {
