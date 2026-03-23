@@ -204,8 +204,11 @@ struct TranscriptView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Action bar at top — avoids toolbar/title overlap.
-            HStack {
+            // Action bar
+            HStack(spacing: 12) {
+                TextField("Search", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 200)
                 modeFilterPicker
                 Spacer()
                 exportMenu
@@ -215,25 +218,22 @@ struct TranscriptView: View {
                     Label("Import Audio", systemImage: "doc.badge.plus")
                 }
                 .disabled(isTranscribingFile)
-                .help("Import an audio or video file for transcription")
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.bar)
+            .padding(.vertical, 8)
 
             Divider()
 
-            NavigationSplitView {
+            // Main content — plain HSplitView, no NavigationSplitView chrome.
+            HSplitView {
                 sidebar
-                    .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 350)
-            } detail: {
+                    .frame(minWidth: 200, idealWidth: 250, maxWidth: 350)
                 detailPanel
+                    .frame(minWidth: 300)
             }
-            .searchable(text: $searchText, prompt: "Search transcripts")
 
             Divider()
 
-            // Bottom record bar
             recordBar
         }
         .overlay {
