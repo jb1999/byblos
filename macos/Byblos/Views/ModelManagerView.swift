@@ -217,6 +217,11 @@ final class ModelDownloader: NSObject, ObservableObject {
             }
         }
 
+        // Auto-download CoreML encoders for already-downloaded speech models.
+        for model in models where model.category == .speech && model.isDownloaded && !model.coremlURL.isEmpty {
+            downloadCoreML(for: model)
+        }
+
         // Auto-select a speech model if none is selected or selected one isn't downloaded.
         let selectedSpeech = UserDefaults.standard.string(forKey: "selectedModel") ?? ""
         let speechDownloaded = models.filter { $0.category == .speech && $0.isDownloaded }
@@ -329,7 +334,63 @@ final class ModelDownloader: NSObject, ObservableObject {
 
             self.cleanupDownload(id: modelId)
             self.refreshModelStates()
+
+            // Auto-download CoreML encoder if available (3x speed on Apple Silicon).
+            if model.category == .speech && !model.coremlURL.isEmpty {
+                self.downloadCoreML(for: model)
+            }
         }
+    }
+
+    /// Download CoreML encoder zip and unzip next to the model file.
+    private func downloadCoreML(for model: ModelEntry) {
+        guard let url = URL(string: model.coremlURL) else { return }
+
+        let modelDir = Self.modelsDirectory(for: model.category)
+        let coremlDirName = model.fileName
+            .replacingOccurrences(of: ".bin", with: "-encoder.mlmodelc")
+        let coremlDir = modelDir.appendingPathComponent(coremlDirName)
+
+        // Skip if already exists.
+        if FileManager.default.fileExists(atPath: coremlDir.path) {
+            Log.info("CoreML encoder already exists: \(coremlDirName)")
+            return
+        }
+
+        Log.info("Downloading CoreML encoder for \(model.displayName)...")
+
+        let task = URLSession.shared.downloadTask(with: url) { tempURL, _, error in
+            guard let tempURL, error == nil else {
+                Log.error("CoreML download failed: \(error?.localizedDescription ?? "unknown")")
+                return
+            }
+
+            // Copy temp file before it's deleted.
+            let zipDest = modelDir.appendingPathComponent("\(coremlDirName).zip")
+            do {
+                try? FileManager.default.removeItem(at: zipDest)
+                try FileManager.default.copyItem(at: tempURL, to: zipDest)
+
+                // Unzip using ditto (handles macOS resource forks correctly).
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                process.arguments = ["-xk", zipDest.path, modelDir.path]
+                try process.run()
+                process.waitUntilExit()
+
+                // Clean up zip.
+                try? FileManager.default.removeItem(at: zipDest)
+
+                if process.terminationStatus == 0 {
+                    Log.info("CoreML encoder installed: \(coremlDirName)")
+                } else {
+                    Log.error("CoreML unzip failed for \(coremlDirName)")
+                }
+            } catch {
+                Log.error("CoreML install failed: \(error)")
+            }
+        }
+        task.resume()
     }
 
     // Called by the delegate for progress updates.
@@ -425,6 +486,8 @@ struct ModelEntry: Identifiable {
     let downloadURL: String
     let category: ModelCategory
     let fileName: String
+    /// CoreML encoder URL (speech models only). Downloaded alongside the main model for 3x speed on Apple Silicon.
+    let coremlURL: String
     var isDownloaded: Bool
     var diskSizeLabel: String?
 
@@ -442,6 +505,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
             category: .speech, fileName: "ggml-tiny.bin",
+            coremlURL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-encoder.mlmodelc.zip",
             isDownloaded: false
         ),
         ModelEntry(
@@ -452,6 +516,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
             category: .speech, fileName: "ggml-base.bin",
+            coremlURL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-encoder.mlmodelc.zip",
             isDownloaded: false
         ),
         ModelEntry(
@@ -462,6 +527,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
             category: .speech, fileName: "ggml-small.bin",
+            coremlURL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-encoder.mlmodelc.zip",
             isDownloaded: false
         ),
         ModelEntry(
@@ -472,6 +538,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
             category: .speech, fileName: "ggml-medium.bin",
+            coremlURL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-encoder.mlmodelc.zip",
             isDownloaded: false
         ),
         ModelEntry(
@@ -482,6 +549,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
             category: .speech, fileName: "ggml-large-v3.bin",
+            coremlURL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-encoder.mlmodelc.zip",
             isDownloaded: false
         ),
         ModelEntry(
@@ -492,6 +560,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
             category: .speech, fileName: "ggml-large-v3-turbo.bin",
+            coremlURL: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-encoder.mlmodelc.zip",
             isDownloaded: false
         ),
         ModelEntry(
@@ -502,6 +571,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/distil-whisper/distil-large-v3-ggml/resolve/main/ggml-distil-large-v3.bin",
             category: .speech, fileName: "ggml-distil-large-v3.bin",
+            coremlURL: "",
             isDownloaded: false
         ),
         // LLM Models — sorted by quality (best first)
@@ -513,6 +583,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/bartowski/Qwen_Qwen3-8B-GGUF/resolve/main/Qwen_Qwen3-8B-Q4_K_M.gguf",
             category: .llm, fileName: "qwen3-8b-q4_k_m.gguf",
+            coremlURL: "",
             isDownloaded: false
         ),
         ModelEntry(
@@ -523,6 +594,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
             category: .llm, fileName: "qwen2.5-7b-instruct-q4_k_m.gguf",
+            coremlURL: "",
             isDownloaded: false
         ),
         ModelEntry(
@@ -533,6 +605,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/bartowski/Qwen_Qwen3.5-4B-GGUF/resolve/main/Qwen_Qwen3.5-4B-Q4_K_M.gguf",
             category: .llm, fileName: "qwen3.5-4b-q4_k_m.gguf",
+            coremlURL: "",
             isDownloaded: false
         ),
         ModelEntry(
@@ -543,6 +616,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
             category: .llm, fileName: "llama-3.2-3b-instruct-q4_k_m.gguf",
+            coremlURL: "",
             isDownloaded: false
         ),
         ModelEntry(
@@ -553,6 +627,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
             category: .llm, fileName: "deepseek-r1-distill-qwen-7b-q4_k_m.gguf",
+            coremlURL: "",
             isDownloaded: false
         ),
         ModelEntry(
@@ -563,6 +638,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/bartowski/EuroLLM-9B-Instruct-GGUF/resolve/main/EuroLLM-9B-Instruct-Q4_K_M.gguf",
             category: .llm, fileName: "eurollm-9b-instruct-q4_k_m.gguf",
+            coremlURL: "",
             isDownloaded: false
         ),
         ModelEntry(
@@ -573,6 +649,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
             category: .llm, fileName: "mistral-7b-instruct-v0.3-q4_k_m.gguf",
+            coremlURL: "",
             isDownloaded: false
         ),
         ModelEntry(
@@ -583,6 +660,7 @@ struct ModelEntry: Identifiable {
             downloadURL:
                 "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
             category: .llm, fileName: "phi-3.5-mini-instruct-q4_k_m.gguf",
+            coremlURL: "",
             isDownloaded: false
         ),
     ]

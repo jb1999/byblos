@@ -212,20 +212,16 @@ struct TranscriptView: View {
             }
             .searchable(text: $searchText, prompt: "Search transcripts")
             .toolbar {
-                ToolbarItem(placement: .automatic) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    modeFilterPicker
+                    exportMenu
                     Button {
                         importAudioFile()
                     } label: {
-                        Label("Import Audio File", systemImage: "doc.badge.plus")
+                        Label("Import Audio", systemImage: "doc.badge.plus")
                     }
                     .disabled(isTranscribingFile)
                     .help("Import an audio or video file for transcription")
-                }
-                ToolbarItem(placement: .automatic) {
-                    exportMenu
-                }
-                ToolbarItem(placement: .automatic) {
-                    modeFilterPicker
                 }
             }
 

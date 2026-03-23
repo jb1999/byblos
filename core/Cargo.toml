@@ -16,7 +16,7 @@ rubato = "0.16"
 hound = "3.5"
 
 # Whisper
-whisper-rs = { version = "0.13", features = ["metal"] }
+whisper-rs = { version = "0.13", features = ["metal", "coreml"] }
 
 # LLM
 llama-cpp-2 = { version = "0.1.139", features = ["metal"] }
