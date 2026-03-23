@@ -204,6 +204,25 @@ struct TranscriptView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Action bar at top — avoids toolbar/title overlap.
+            HStack {
+                modeFilterPicker
+                Spacer()
+                exportMenu
+                Button {
+                    importAudioFile()
+                } label: {
+                    Label("Import Audio", systemImage: "doc.badge.plus")
+                }
+                .disabled(isTranscribingFile)
+                .help("Import an audio or video file for transcription")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.bar)
+
+            Divider()
+
             NavigationSplitView {
                 sidebar
                     .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 350)
@@ -211,19 +230,6 @@ struct TranscriptView: View {
                 detailPanel
             }
             .searchable(text: $searchText, prompt: "Search transcripts")
-            .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    modeFilterPicker
-                    exportMenu
-                    Button {
-                        importAudioFile()
-                    } label: {
-                        Label("Import Audio", systemImage: "doc.badge.plus")
-                    }
-                    .disabled(isTranscribingFile)
-                    .help("Import an audio or video file for transcription")
-                }
-            }
 
             Divider()
 
