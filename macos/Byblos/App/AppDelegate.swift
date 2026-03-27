@@ -585,7 +585,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // Check for undo voice commands.
                 if self?.isUndoCommand(finalText) == true {
                     self?.undoLastTranscription()
-                    NagManager.shared.recordTranscription()
                     return
                 }
 
@@ -629,7 +628,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         try? await Task.sleep(nanoseconds: 3_000_000_000)
                         self?.hideOverlay()
                     }
-                    NagManager.shared.recordTranscription()
                     return
                 }
 
@@ -658,8 +656,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.lastTypedText = finalText
                 self?.lastTypedLength = finalText.count
 
-                // Record transcription for nag/shareware tracking.
-                NagManager.shared.recordTranscription()
 
                 // If LLM is available, re-process the text asynchronously.
                 if LlmService.shared.isReady && !dictationMode.systemPrompt.isEmpty {

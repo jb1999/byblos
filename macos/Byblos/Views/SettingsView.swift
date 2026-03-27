@@ -201,21 +201,27 @@ struct SettingsView: View {
 
             Divider()
 
-            // License section.
-            LicenseSettingsSection()
-
-            Divider()
-
-            VStack(spacing: 4) {
-                Text("Byblos is shareware — free to use with no restrictions.")
+            VStack(spacing: 6) {
+                Text("Free for personal use.")
+                    .font(.callout)
+                Text("Commercial use (work, business, revenue) requires a license — $49/user/year.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                Text("We don't enforce this technically — we trust you.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
 
-                Link("Buy Annual License →", destination: URL(string: "https://byblos.im/#support")!)
+                Link("Buy Commercial License →", destination: URL(string: "https://byblos.im/#commercial")!)
                     .font(.callout)
                     .padding(.top, 4)
             }
+
+            Divider()
+
+            // License key activation.
+            LicenseSettingsSection()
 
             Spacer()
 

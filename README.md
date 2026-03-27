@@ -96,9 +96,13 @@ Download via Settings → Models or `./scripts/download-model.sh <model-name>`.
 
 Place any GGUF model in `~/Library/Application Support/Byblos/llm-models/`. Recommended: Qwen2.5-7B-Instruct-Q4_K_M (~4.5GB).
 
-## Shareware
+## Licensing
 
-Byblos is free to use with no restrictions. If it becomes part of your workflow, consider getting an [annual license](https://byblos.im/#support) to support development.
+**Free for personal use.** No limits, no nag screens, no feature restrictions.
+
+**Commercial use** (work, business, revenue) requires a license: **$49/user/year.** We don't enforce this technically — we trust you.
+
+[Buy Commercial License](https://byblos.im/#commercial)
 
 ## License
 
