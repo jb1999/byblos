@@ -24,6 +24,8 @@ struct SettingsView: View {
         case models = "Models"
         case audio = "Audio"
         case vocabulary = "Vocabulary"
+        case tasks = "Tasks"
+        case skills = "Skills"
         case about = "About"
 
         var icon: String {
@@ -32,6 +34,8 @@ struct SettingsView: View {
             case .models: "cpu"
             case .audio: "mic"
             case .vocabulary: "character.book.closed"
+            case .tasks: "clock.arrow.2.circlepath"
+            case .skills: "puzzlepiece"
             case .about: "info.circle"
             }
         }
@@ -53,6 +57,8 @@ struct SettingsView: View {
                 case .models: modelsTab
                 case .audio: audioTab
                 case .vocabulary: vocabularyTab
+                case .tasks: TasksSettingsView()
+                case .skills: SkillsSettingsView()
                 case .about: aboutTab
                 }
             }
@@ -350,6 +356,352 @@ struct VocabularySettingsView: View {
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+}
+
+// MARK: - Tasks Settings
+
+struct TasksSettingsView: View {
+    @StateObject private var scheduler = TaskScheduler.shared
+    @State private var showingAddSheet = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Scheduled Tasks")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    showingAddSheet = true
+                } label: {
+                    Label("Add Task", systemImage: "plus")
+                }
+            }
+
+            Text("Run agent commands on a schedule. Tasks use the AI agent to process prompts automatically.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            if scheduler.tasks.isEmpty {
+                Text("No scheduled tasks yet.")
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 20)
+            } else {
+                List {
+                    ForEach(scheduler.tasks) { task in
+                        TaskRow(task: task)
+                    }
+                }
+                .frame(minHeight: 200)
+            }
+        }
+        .padding()
+        .sheet(isPresented: $showingAddSheet) {
+            AddTaskSheet(isPresented: $showingAddSheet)
+        }
+    }
+}
+
+struct TaskRow: View {
+    let task: ScheduledTask
+    @StateObject private var scheduler = TaskScheduler.shared
+    @State private var isRunning = false
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(task.name)
+                    .fontWeight(.medium)
+                Text(scheduleDescription(task.schedule))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let lastRun = task.lastRun {
+                    Text("Last run: \(lastRun.formatted(.relative(presentation: .named)))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer()
+
+            Toggle("", isOn: Binding(
+                get: { task.enabled },
+                set: { newValue in
+                    var updated = task
+                    updated.enabled = newValue
+                    scheduler.updateTask(updated)
+                }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+
+            Button {
+                isRunning = true
+                Task {
+                    _ = await scheduler.runTask(task)
+                    isRunning = false
+                }
+            } label: {
+                if isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "play.fill")
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isRunning)
+
+            Button {
+                scheduler.removeTask(id: task.id)
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func scheduleDescription(_ schedule: TaskSchedule) -> String {
+        switch schedule {
+        case .daily(let h, let m):
+            return "Daily at \(String(format: "%d:%02d", h, m))"
+        case .weekdays(let h, let m):
+            return "Weekdays at \(String(format: "%d:%02d", h, m))"
+        case .interval(let minutes):
+            return "Every \(minutes) min"
+        case .manual:
+            return "Manual only"
+        }
+    }
+}
+
+struct AddTaskSheet: View {
+    @Binding var isPresented: Bool
+    @StateObject private var scheduler = TaskScheduler.shared
+    @State private var name = ""
+    @State private var prompt = ""
+    @State private var scheduleType = 0 // 0=daily, 1=weekdays, 2=interval, 3=manual
+    @State private var hour = 9
+    @State private var minute = 0
+    @State private var intervalMinutes = 30
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("New Scheduled Task")
+                .font(.headline)
+
+            Form {
+                TextField("Name", text: $name)
+
+                TextField("Prompt", text: $prompt, axis: .vertical)
+                    .lineLimit(3...6)
+
+                Picker("Schedule", selection: $scheduleType) {
+                    Text("Daily").tag(0)
+                    Text("Weekdays").tag(1)
+                    Text("Interval").tag(2)
+                    Text("Manual").tag(3)
+                }
+
+                if scheduleType < 2 {
+                    HStack {
+                        Picker("Hour", selection: $hour) {
+                            ForEach(0..<24, id: \.self) { h in
+                                Text("\(h)").tag(h)
+                            }
+                        }
+                        .frame(width: 80)
+
+                        Picker("Minute", selection: $minute) {
+                            ForEach([0, 15, 30, 45], id: \.self) { m in
+                                Text(String(format: "%02d", m)).tag(m)
+                            }
+                        }
+                        .frame(width: 80)
+                    }
+                }
+
+                if scheduleType == 2 {
+                    Picker("Every", selection: $intervalMinutes) {
+                        Text("15 min").tag(15)
+                        Text("30 min").tag(30)
+                        Text("1 hour").tag(60)
+                        Text("2 hours").tag(120)
+                        Text("4 hours").tag(240)
+                    }
+                }
+            }
+
+            HStack {
+                Button("Cancel") {
+                    isPresented = false
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button("Add") {
+                    let schedule: TaskSchedule
+                    switch scheduleType {
+                    case 0: schedule = .daily(hour: hour, minute: minute)
+                    case 1: schedule = .weekdays(hour: hour, minute: minute)
+                    case 2: schedule = .interval(minutes: intervalMinutes)
+                    default: schedule = .manual
+                    }
+
+                    let task = ScheduledTask(
+                        id: UUID(),
+                        name: name,
+                        prompt: prompt,
+                        schedule: schedule,
+                        enabled: true,
+                        lastRun: nil,
+                        lastResult: nil
+                    )
+                    scheduler.addTask(task)
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || prompt.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding()
+        .frame(width: 420)
+    }
+}
+
+// MARK: - Skills Settings
+
+struct SkillsSettingsView: View {
+    @StateObject private var manager = SkillsManager.shared
+    @State private var showingCreateSheet = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Skills")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    showingCreateSheet = true
+                } label: {
+                    Label("Create Skill", systemImage: "plus")
+                }
+            }
+
+            Text("Skills add specialized capabilities to the AI agent. Each skill is a folder with a SKILL.md file containing instructions.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            if manager.skills.isEmpty {
+                Text("No skills installed.")
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 20)
+            } else {
+                List {
+                    ForEach(manager.skills) { skill in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(skill.name)
+                                    .fontWeight(.medium)
+                                if !skill.description.isEmpty {
+                                    Text(skill.description)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text("Triggers: \(skill.trigger)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            Button {
+                                manager.removeSkill(id: skill.id)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(minHeight: 150)
+            }
+
+            Divider()
+
+            Button("Open Skills Folder") {
+                NSWorkspace.shared.open(manager.skillsDirectoryURL)
+            }
+            .font(.caption)
+        }
+        .padding()
+        .sheet(isPresented: $showingCreateSheet) {
+            CreateSkillSheet(isPresented: $showingCreateSheet)
+        }
+    }
+}
+
+struct CreateSkillSheet: View {
+    @Binding var isPresented: Bool
+    @StateObject private var manager = SkillsManager.shared
+    @State private var name = ""
+    @State private var trigger = ""
+    @State private var description = ""
+    @State private var instructions = ""
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Create Skill")
+                .font(.headline)
+
+            Form {
+                TextField("Name", text: $name)
+
+                TextField("Trigger keywords (pipe-separated)", text: $trigger)
+                    .textFieldStyle(.roundedBorder)
+
+                TextField("Description", text: $description)
+
+                Text("Instructions (Markdown)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                TextEditor(text: $instructions)
+                    .font(.body.monospaced())
+                    .frame(minHeight: 120)
+                    .border(Color.secondary.opacity(0.3))
+            }
+
+            HStack {
+                Button("Cancel") {
+                    isPresented = false
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button("Create") {
+                    manager.createSkill(
+                        name: name,
+                        trigger: trigger,
+                        description: description,
+                        instructions: instructions
+                    )
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || instructions.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding()
+        .frame(width: 480, height: 400)
     }
 }
 

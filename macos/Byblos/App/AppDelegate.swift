@@ -95,6 +95,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupHotkey()
         setupAccessibility()
         applyAppMode()
+
+        // Start scheduled tasks and load skills.
+        TaskScheduler.shared.start()
+        SkillsManager.shared.loadSkills()
+
         Log.info("Byblos ready. Engine loaded: \(self.engine != nil)")
 
         // Validate license on launch (once/day, non-blocking).

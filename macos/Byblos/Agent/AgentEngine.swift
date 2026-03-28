@@ -16,10 +16,13 @@ class AgentEngine: ObservableObject {
     private let systemPrompt = """
     You are Byblos, a Mac AI assistant. Respond ONLY with valid JSON.
 
-    Available actions: READ_SCREEN, SEARCH_FILES (params: query), READ_FILE (params: path), OPEN_APP (params: name), RUN_APPLESCRIPT (params: script), RUN_COMMAND (params: command), CLIPBOARD_GET, CLIPBOARD_SET (params: text), ANSWER
+    Available actions: READ_SCREEN, SEARCH_FILES (params: query), READ_FILE (params: path), OPEN_APP (params: name), RUN_APPLESCRIPT (params: script), RUN_COMMAND (params: command), CLIPBOARD_GET, CLIPBOARD_SET (params: text), SHORTCUT (params: name, input?), REMEMBER (params: key, value), RECALL (params: key?), BROWSE_URL (params: url), GET_PAGE, SEARCH_WEB (params: query), ANSWER
 
     Format: {"actions": [{"type": "ACTION", "params": {}}], "response": "brief message"}
     Use ANSWER (no actions needed) for general questions. Use the context provided.
+    Use REMEMBER to store facts about the user. Use RECALL with no key to list all memories.
+    Use SHORTCUT to run a macOS Shortcut by name.
+    Use BROWSE_URL to open a URL, GET_PAGE to read current browser page, SEARCH_WEB to search Google.
 
     Examples:
     "what's on my screen" → {"actions":[{"type":"READ_SCREEN","params":{}}],"response":"Reading your screen."}
@@ -27,6 +30,11 @@ class AgentEngine: ObservableObject {
     "open safari" → {"actions":[{"type":"OPEN_APP","params":{"name":"Safari"}}],"response":"Opening Safari."}
     "what time is it" → {"actions":[{"type":"ANSWER","params":{}}],"response":"It's [use the time from context]."}
     "what's on my clipboard" → {"actions":[{"type":"CLIPBOARD_GET","params":{}}],"response":"Checking clipboard."}
+    "remember I prefer bullet points" → {"actions":[{"type":"REMEMBER","params":{"key":"preferred_format","value":"bullet points"}}],"response":"I'll remember that."}
+    "what do you know about me" → {"actions":[{"type":"RECALL","params":{}}],"response":"Let me check."}
+    "run my morning routine shortcut" → {"actions":[{"type":"SHORTCUT","params":{"name":"Morning Routine"}}],"response":"Running shortcut."}
+    "search the web for swift concurrency" → {"actions":[{"type":"SEARCH_WEB","params":{"query":"swift concurrency"}}],"response":"Searching..."}
+    "what's on this page" → {"actions":[{"type":"GET_PAGE","params":{}}],"response":"Reading the page."}
     """
 
     /// Process a voice command through the agent.
@@ -56,8 +64,29 @@ class AgentEngine: ObservableObject {
         formatter.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a"
         contextParts.append("Current time: \(formatter.string(from: Date()))")
 
+        // Agent memory context.
+        let memoryContext = AgentMemory.shared.contextString()
+        if !memoryContext.isEmpty {
+            contextParts.append(memoryContext)
+        }
+
+        // Available shortcuts.
+        let shortcuts = ScriptRunner.listShortcuts()
+        if !shortcuts.isEmpty {
+            let shortcutList = shortcuts.prefix(20).joined(separator: ", ")
+            contextParts.append("Available Shortcuts: \(shortcutList)")
+        }
+
         let context = contextParts.joined(separator: "\n")
-        let fullPrompt = "\(systemPrompt)\n\nCurrent context:\n\(context)\n\nUser said: \(input)"
+
+        // Check if a skill matches the user input.
+        var skillContext = ""
+        if let skill = SkillsManager.shared.matchSkill(for: input) {
+            skillContext = "\n\nSkill activated: \(skill.name)\nSkill instructions:\n\(skill.instructions)\n"
+            Log.info("[Agent] Skill matched: \(skill.name)")
+        }
+
+        let fullPrompt = "\(systemPrompt)\(skillContext)\n\nCurrent context:\n\(context)\n\nUser said: \(input)"
 
         // Send to LLM.
         guard LlmService.shared.isReady else {
@@ -211,6 +240,58 @@ class AgentEngine: ObservableObject {
             let title = action.params["title"] ?? "Byblos"
             let message = action.params["message"] ?? ""
             let result = ScriptRunner.showNotification(title: title, message: message)
+            return result.description
+
+        case "SHORTCUT":
+            let name = action.params["name"] ?? ""
+            let input = action.params["input"]
+            let result = ScriptRunner.runShortcut(name, input: input)
+            return result.description
+
+        case "REMEMBER":
+            let key = action.params["key"] ?? ""
+            let value = action.params["value"] ?? ""
+            guard !key.isEmpty, !value.isEmpty else {
+                return "Missing key or value for REMEMBER."
+            }
+            AgentMemory.shared.remember(key: key, value: value)
+            return "Remembered: \(key) = \(value)"
+
+        case "RECALL":
+            let key = action.params["key"] ?? ""
+            if key.isEmpty {
+                let all = AgentMemory.shared.recallAll()
+                if all.isEmpty {
+                    return "I don't have any memories stored yet."
+                }
+                return all.map { "- \($0.key): \($0.value)" }.sorted().joined(separator: "\n")
+            }
+            if let value = AgentMemory.shared.recall(key: key) {
+                return "\(key): \(value)"
+            }
+            return "I don't have a memory for '\(key)'."
+
+        case "FORGET":
+            let key = action.params["key"] ?? ""
+            AgentMemory.shared.forget(key: key)
+            return "Forgot: \(key)"
+
+        case "BROWSE_URL":
+            let url = action.params["url"] ?? ""
+            let result = WebBrowser.openURL(url)
+            return result.description
+
+        case "GET_PAGE":
+            if let content = WebBrowser.getCurrentPageContent() {
+                let title = WebBrowser.getCurrentPageTitle() ?? "Unknown page"
+                let url = WebBrowser.getCurrentURL() ?? ""
+                return "Page: \(title)\nURL: \(url)\n\n\(content)"
+            }
+            return "Could not read the current browser page. Make sure Safari or Chrome is open."
+
+        case "SEARCH_WEB":
+            let query = action.params["query"] ?? ""
+            let result = WebBrowser.search(query)
             return result.description
 
         case "ANSWER":
