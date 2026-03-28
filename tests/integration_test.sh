@@ -70,37 +70,91 @@ LLM_MODEL=$(ls "$HOME/Library/Application Support/Byblos/llm-models/"*.gguf 2>/d
 if [ -z "$LLM_MODEL" ] || [ ! -f "$LLM_HELPER" ]; then
     skip "LLM helper" "No model or binary"
 else
-    # Ping test
-    RESULT=$(echo '{"method":"ping"}' | timeout 45 "$LLM_HELPER" "$LLM_MODEL" 2>/dev/null | tail -1)
-    if echo "$RESULT" | grep -q '"pong"'; then
-        pass "LLM ping/pong"
+    # Start the LLM helper as a background process with named pipes.
+    LLM_IN=$(mktemp -u /tmp/byblos-test-in.XXXXX)
+    LLM_OUT=$(mktemp /tmp/byblos-test-out.XXXXX)
+    mkfifo "$LLM_IN"
+
+    "$LLM_HELPER" "$LLM_MODEL" < "$LLM_IN" > "$LLM_OUT" 2>/dev/null &
+    LLM_PID=$!
+
+    # Keep the pipe open with a background cat.
+    exec 3>"$LLM_IN"
+
+    # Wait for "ready" (up to 120 seconds for model loading).
+    echo "  Loading LLM model (this may take a minute)..."
+    READY=false
+    for i in $(seq 1 120); do
+        if grep -q '"ready"' "$LLM_OUT" 2>/dev/null; then
+            READY=true
+            break
+        fi
+        sleep 1
+    done
+
+    if ! $READY; then
+        fail "LLM model load" "Timed out after 120s"
+        kill $LLM_PID 2>/dev/null
     else
-        fail "LLM ping" "Got: $RESULT"
+        pass "LLM model loaded"
+
+        # Helper: send a request and wait for response.
+        llm_request() {
+            local request=$1 timeout_secs=${2:-30}
+            # Clear previous output.
+            > "$LLM_OUT"
+            echo "$request" >&3
+            for i in $(seq 1 $timeout_secs); do
+                local line=$(grep '"ok"' "$LLM_OUT" 2>/dev/null | tail -1)
+                if [ -n "$line" ] && [ "$line" != '{"ok":true,"result":"ready"}' ]; then
+                    echo "$line"
+                    return 0
+                fi
+                sleep 1
+            done
+            echo ""
+            return 1
+        }
+
+        # Test: ping
+        RESULT=$(llm_request '{"method":"ping"}' 10)
+        if echo "$RESULT" | grep -q '"pong"'; then
+            pass "LLM ping/pong"
+        else
+            fail "LLM ping" "Got: $RESULT"
+        fi
+
+        # Test: text cleanup
+        RESULT=$(llm_request '{"method":"process","text":"um so like fix the bug please","system_prompt":"Remove filler words. Return ONLY cleaned text. /no_think"}' 45)
+        if echo "$RESULT" | grep -q '"ok":true'; then
+            pass "LLM text cleanup"
+        else
+            fail "LLM text cleanup" "Got: $RESULT"
+        fi
+
+        # Test: JSON agent output
+        RESULT=$(llm_request '{"method":"process","text":"what time is it","system_prompt":"Respond ONLY with JSON: {\"actions\":[{\"type\":\"ANSWER\",\"params\":{}}],\"response\":\"time\"} /no_think"}' 45)
+        if echo "$RESULT" | grep -q 'ANSWER\|actions'; then
+            pass "LLM agent JSON"
+        else
+            fail "LLM agent JSON" "Got: $RESULT"
+        fi
+
+        # Test: think-tag stripping
+        RESULT=$(llm_request '{"method":"process","text":"say hello","system_prompt":"Just say hello."}' 45)
+        if echo "$RESULT" | grep -q '<think>'; then
+            fail "Think-tag stripping" "Tags leaked"
+        else
+            pass "Think-tag stripping"
+        fi
+
+        # Shutdown
+        echo '{"method":"quit"}' >&3
+        exec 3>&-
+        wait $LLM_PID 2>/dev/null
     fi
 
-    # Text cleanup test
-    RESULT=$( (sleep 20; echo '{"method":"process","text":"um so like fix the bug please","system_prompt":"Remove filler words. Return ONLY the cleaned text, nothing else. /no_think"}'; sleep 30; echo '{"method":"quit"}') | timeout 60 "$LLM_HELPER" "$LLM_MODEL" 2>/dev/null | grep '"ok":true' | tail -1)
-    if echo "$RESULT" | grep -q '"ok":true'; then
-        pass "LLM text cleanup"
-    else
-        fail "LLM text cleanup" "No valid response"
-    fi
-
-    # JSON agent output test
-    RESULT=$( (sleep 5; echo '{"method":"process","text":"what time is it","system_prompt":"Respond ONLY with JSON: {\"actions\":[{\"type\":\"ANSWER\",\"params\":{}}],\"response\":\"message\"} /no_think"}'; sleep 30; echo '{"method":"quit"}') | timeout 45 "$LLM_HELPER" "$LLM_MODEL" 2>/dev/null | grep '"ok":true' | tail -1)
-    if echo "$RESULT" | grep -q 'ANSWER\|actions'; then
-        pass "LLM agent JSON"
-    else
-        fail "LLM agent JSON" "No action in response"
-    fi
-
-    # Think-tag stripping test
-    RESULT=$( (sleep 5; echo '{"method":"process","text":"hello","system_prompt":"Say hi back."}'; sleep 30; echo '{"method":"quit"}') | timeout 45 "$LLM_HELPER" "$LLM_MODEL" 2>/dev/null | grep '"ok":true' | tail -1)
-    if echo "$RESULT" | grep -q '<think>'; then
-        fail "Think-tag stripping" "Tags not stripped"
-    else
-        pass "Think-tag stripping"
-    fi
+    rm -f "$LLM_IN" "$LLM_OUT"
 fi
 
 # ---- 4. Agent Components ----
